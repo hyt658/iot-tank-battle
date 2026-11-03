@@ -1,0 +1,9 @@
+.vscode/
+build/
+sdkconfig
+sdkconfig.old
+managed_components/
+.cache/
+
+.DS_Store
+.clangd
