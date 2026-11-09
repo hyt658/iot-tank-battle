@@ -6,4 +6,3 @@ managed_components/
 .cache/
 
 .DS_Store
-.clangd

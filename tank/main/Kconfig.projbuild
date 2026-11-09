@@ -1,0 +1,15 @@
+menu "Tank Config"
+
+    config TANK_WIFI_SSID
+        string "Wi-Fi SSID"
+        default "iot-tank-arena"
+
+    config TANK_WIFI_PASSWORD
+        string "Wi-Fi password"
+        default ""
+
+    config TANK_SERVER_URI
+        string "Server WebSocket URI"
+        default "ws://192.168.2.1:8000/ws/tank"
+
+endmenu

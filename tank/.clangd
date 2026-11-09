@@ -1,0 +1,14 @@
+CompileFlags:
+  CompilationDatabase: build
+  Remove:
+    - -fno-shrink-wrap
+    - -fstrict-volatile-bitfields
+    - -fno-tree-switch-conversion
+    - -mdisable-hardware-atomics
+
+Diagnostics:
+  ClangTidy:
+    Remove: modernize-use-std-print
+  Includes:
+    IgnoreHeader:
+      - freertos/FreeRTOS\.h
