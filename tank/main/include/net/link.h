@@ -14,9 +14,6 @@ struct Handlers {
 /**
  * @brief Connect to the game server over WebSocket in the background. If the connection
  * fails or drops later, it keeps retrying until it is connected again.
- *
- * @param uri
- * @param handlers
  */
 void start(const char* uri, const Handlers& handlers);
 
