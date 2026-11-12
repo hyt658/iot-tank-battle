@@ -8,9 +8,8 @@
 namespace core::protocol {
 
 struct Message {
-    enum class Type : uint8_t { Unknown, Mode, Drive, Fire, Sound, Error };
-    enum class Mode : uint8_t { Enabled, Disabled };
-    enum class Sound : uint8_t { GameStart, GameEnd, Respawn, Hurt, Death, HitConfirm };
+    enum class Type : uint8_t { Unknown, State, Drive, Fire, Event, Error };
+    enum class Event : uint8_t { GameStart, GameEnd, Respawn, Hurt, Death, HitConfirm };
 
     struct Drive {
         int8_t left;   // [-100, 100], positive is forward.
@@ -19,9 +18,9 @@ struct Message {
     };
 
     Type type;
-    Mode mode;
+    bool enable;
     Drive drive;
-    Sound sound;
+    Event event;
     uint8_t shot; // [0, 15]
 };
 

@@ -39,28 +39,31 @@ std::optional<int> get_int(const cJSON* root, const char* key, int min, int max)
     return static_cast<int>(value);
 }
 
+// Returns root[key] if it is a bool, std::nullopt otherwise.
+std::optional<bool> get_bool(const cJSON* root, const char* key) {
+    cJSON* item = cJSON_GetObjectItemCaseSensitive(root, key);
+    if (!cJSON_IsBool(item)) {
+        return std::nullopt;
+    }
+    return cJSON_IsTrue(item);
+}
+
 Message::Type to_type(std::string_view name) {
     if (name == "error") return Message::Type::Error;
-    if (name == "mode") return Message::Type::Mode;
+    if (name == "state") return Message::Type::State;
     if (name == "drive") return Message::Type::Drive;
     if (name == "fire") return Message::Type::Fire;
-    if (name == "sound") return Message::Type::Sound;
+    if (name == "event") return Message::Type::Event;
     return Message::Type::Unknown;
 }
 
-std::optional<Message::Mode> to_mode(std::string_view name) {
-    if (name == "enabled") return Message::Mode::Enabled;
-    if (name == "disabled") return Message::Mode::Disabled;
-    return std::nullopt;
-}
-
-std::optional<Message::Sound> to_sound(std::string_view name) {
-    if (name == "game_start") return Message::Sound::GameStart;
-    if (name == "game_end") return Message::Sound::GameEnd;
-    if (name == "respawn") return Message::Sound::Respawn;
-    if (name == "hurt") return Message::Sound::Hurt;
-    if (name == "death") return Message::Sound::Death;
-    if (name == "hit_confirm") return Message::Sound::HitConfirm;
+std::optional<Message::Event> to_event(std::string_view kind) {
+    if (kind == "game_start") return Message::Event::GameStart;
+    if (kind == "game_end") return Message::Event::GameEnd;
+    if (kind == "respawn") return Message::Event::Respawn;
+    if (kind == "hurt") return Message::Event::Hurt;
+    if (kind == "death") return Message::Event::Death;
+    if (kind == "hit_confirm") return Message::Event::HitConfirm;
     return std::nullopt;
 }
 
@@ -85,16 +88,12 @@ std::optional<Message> core::protocol::parse(const char* data, size_t len) {
             [[fallthrough]];
         case Message::Type::Error:
             break;
-        case Message::Type::Mode: {
-            auto name = get_string(root.get(), "mode");
-            if (!name) {
+        case Message::Type::State: {
+            auto has_enable = get_bool(root.get(), "enable");
+            if (!has_enable) {
                 return std::nullopt;
             }
-            auto mode = to_mode(*name);
-            if (!mode) {
-                return std::nullopt;
-            }
-            msg.mode = *mode;
+            msg.enable = *has_enable;
             break;
         }
         case Message::Type::Drive: {
@@ -119,16 +118,18 @@ std::optional<Message> core::protocol::parse(const char* data, size_t len) {
             msg.shot = static_cast<uint8_t>(*shot);
             break;
         }
-        case Message::Type::Sound: {
-            auto name = get_string(root.get(), "name");
-            if (!name) {
+        case Message::Type::Event: {
+            auto kind = get_string(root.get(), "kind");
+            if (!kind) {
                 return std::nullopt;
             }
-            auto sound = to_sound(*name);
-            if (!sound) {
-                return std::nullopt;
+            // Ignore unknown kinds
+            auto event = to_event(*kind);
+            if (!event) {
+                msg.type = Message::Type::Unknown;
+                break;
             }
-            msg.sound = *sound;
+            msg.event = *event;
             break;
         }
     }
