@@ -6,8 +6,8 @@
 namespace net::link {
 
 struct Handlers {
-    void (*connected_handler)();
-    void (*disconnected_handler)();
+    void (*connect_handler)();
+    void (*disconnect_handler)();
     void (*text_handler)(const char* data, size_t len);
 };
 
