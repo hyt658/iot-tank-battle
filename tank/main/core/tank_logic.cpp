@@ -130,12 +130,12 @@ void tank_logic_task(void* arg) {
     }
 }
 
-void connected_handler() {
+void connect_handler() {
     net::link::send_text(encode_hello(s_tank_id));
     enqueue(Input::Type::Connect);
 }
 
-void disconnected_handler() {
+void disconnect_handler() {
     ESP_LOGW(TAG, "server disconnected");
     enqueue(Input::Type::Disconnect);
 }
@@ -179,8 +179,8 @@ void core::tank_logic::start(const char* server_uri, uint8_t tank_id) {
     net::link::start(
         server_uri,
         {
-            .connected_handler = connected_handler,
-            .disconnected_handler = disconnected_handler,
+            .connect_handler = connect_handler,
+            .disconnect_handler = disconnect_handler,
             .text_handler = text_handler,
         }
     );

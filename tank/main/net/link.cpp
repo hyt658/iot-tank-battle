@@ -25,6 +25,10 @@ constexpr int PongTimeoutSec = 3;
 esp_websocket_client_handle_t s_client = nullptr;
 net::link::Handlers s_handlers = {};
 
+// We only want to invoke the disconnect_handler when an established connection drops, not
+// on every failed reconnect attempt. Therefore, we track the connection state ourselves.
+bool s_connected = false;
+
 // Handler sever's ping. Returns true if the message is a valid ping, false otherwise.
 bool handle_ping(const char* data, size_t len) {
     JsonPtr root(cJSON_ParseWithLength(data, len), &cJSON_Delete);
@@ -58,25 +62,16 @@ void ws_event_handler(
 
     switch (event_id) {
         case WEBSOCKET_EVENT_CONNECTED:
+            s_connected = true;
             ESP_LOGI(TAG, "connected to server");
-            if (s_handlers.connected_handler) {
-                s_handlers.connected_handler();
-            }
-            break;
-        case WEBSOCKET_EVENT_DISCONNECTED:
-            [[fallthrough]];
-        case WEBSOCKET_EVENT_CLOSED:
-            // Websocket client will automatically reconnect after ReconnectTimeoutMs.
-            ESP_LOGW(
-                TAG, "disconnected from server, retrying in %d ms", ReconnectTimeoutMs
-            );
-            if (s_handlers.disconnected_handler) {
-                s_handlers.disconnected_handler();
+
+            if (s_handlers.connect_handler) {
+                s_handlers.connect_handler();
             }
             break;
         case WEBSOCKET_EVENT_DATA:
-            // We only care about text frames. Ping, pong and close frames also arrive
-            // here.
+            // Ping, pong and close frames also arrive here.
+            // We only care about text frames.
             if (data->op_code != WS_TRANSPORT_OPCODES_TEXT) {
                 break;
             }
@@ -100,11 +95,22 @@ void ws_event_handler(
                 s_handlers.text_handler(data->data_ptr, data->data_len);
             }
             break;
-        case WEBSOCKET_EVENT_ERROR:
-            ESP_LOGE(
-                TAG, "error: type %d, socket errno %d", data->error_handle.error_type,
-                data->error_handle.esp_transport_sock_errno
+        case WEBSOCKET_EVENT_DISCONNECTED:
+            [[fallthrough]];
+        case WEBSOCKET_EVENT_CLOSED:
+            if (!s_connected) {
+                break;
+            }
+            s_connected = false;
+
+            // Websocket client will automatically reconnect after ReconnectTimeoutMs.
+            ESP_LOGW(
+                TAG, "disconnected from server, retrying in %d ms", ReconnectTimeoutMs
             );
+
+            if (s_handlers.disconnect_handler) {
+                s_handlers.disconnect_handler();
+            }
             break;
         default:
             break;
