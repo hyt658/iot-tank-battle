@@ -5,6 +5,11 @@
 namespace hw::infrared {
 
 /**
+ * @brief Start receiving IR shots in the background.
+ */
+void start(void (*hit_handler)(uint8_t shooter, uint8_t shot));
+
+/**
  * @brief Fire one IR shot that carries the shooter and the shot number.
  *
  * @param shooter  Number of this tank.

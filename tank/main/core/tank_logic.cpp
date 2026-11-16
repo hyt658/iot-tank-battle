@@ -22,23 +22,33 @@ constexpr const char* TAG = "core::tank_logic";
 constexpr uint32_t TaskStackSize = 4096;
 constexpr UBaseType_t TaskPriority = 5;
 constexpr UBaseType_t QueueSize = 32;
+
 constexpr TickType_t DriveTimeout = pdMS_TO_TICKS(300);
+constexpr TickType_t HitDedupeTime = pdMS_TO_TICKS(1000);
 
 struct Input {
-    enum class Type : uint8_t { Connect, Disconnect, Message };
+    enum class Type : uint8_t { Connect, Disconnect, Message, Hit };
+
+    struct HitInfo {
+        uint8_t shooter;
+        uint8_t shot;
+    };
 
     Type type;
-    Message msg;
+    Message msg = {};
+    HitInfo hit = {};
 };
 
 uint8_t s_tank_id = 0;
 bool s_enabled = false;
 bool s_moving = false;
-TickType_t s_last_drive_time = 0;
 QueueHandle_t s_input_queue = nullptr;
 
-void enqueue(Input::Type type, const Message& msg = {}) {
-    Input input = {.type = type, .msg = msg};
+Input::HitInfo s_last_hit = {};
+TickType_t s_last_drive_time = 0;
+TickType_t s_last_hit_time = 0;
+
+void enqueue(const Input& input) {
     if (xQueueSend(s_input_queue, &input, 0) != pdTRUE) {
         ESP_LOGW(TAG, "input queue is full, dropped an input");
     }
@@ -88,6 +98,26 @@ void handle_message(const Message& msg) {
     }
 }
 
+void handle_hit(const Input::HitInfo& hit) {
+    // The tank receiver may also see its own shot.
+    if (hit.shooter == s_tank_id) {
+        return;
+    }
+
+    // The same shot can reach us several times, since each shot could be sent in several
+    // frames and more than one receiver may decode the same frame. Report it only once.
+    TickType_t now = xTaskGetTickCount();
+    if (hit.shooter == s_last_hit.shooter && hit.shot == s_last_hit.shot &&
+        now - s_last_hit_time < HitDedupeTime) {
+        return;
+    }
+    s_last_hit = hit;
+    s_last_hit_time = now;
+
+    ESP_LOGI(TAG, "hit by tank %d, shot %d", hit.shooter, hit.shot);
+    net::link::send_text(encode_hit(hit.shooter, hit.shot));
+}
+
 void tank_logic_task(void* arg) {
     (void)arg;
     while (true) {
@@ -126,18 +156,21 @@ void tank_logic_task(void* arg) {
             case Input::Type::Message:
                 handle_message(input.msg);
                 break;
+            case Input::Type::Hit:
+                handle_hit(input.hit);
+                break;
         }
     }
 }
 
 void connect_handler() {
     net::link::send_text(encode_hello(s_tank_id));
-    enqueue(Input::Type::Connect);
+    enqueue({.type = Input::Type::Connect});
 }
 
 void disconnect_handler() {
     ESP_LOGW(TAG, "server disconnected");
-    enqueue(Input::Type::Disconnect);
+    enqueue({.type = Input::Type::Disconnect});
 }
 
 void text_handler(const char* data, size_t len) {
@@ -156,7 +189,11 @@ void text_handler(const char* data, size_t len) {
         return;
     }
 
-    enqueue(Input::Type::Message, *msg);
+    enqueue({.type = Input::Type::Message, .msg = *msg});
+}
+
+void hit_handler(uint8_t shooter, uint8_t shot) {
+    enqueue({.type = Input::Type::Hit, .hit = {.shooter = shooter, .shot = shot}});
 }
 
 } // namespace
@@ -176,6 +213,7 @@ void core::tank_logic::start(const char* server_uri, uint8_t tank_id) {
         abort();
     }
 
+    hw::infrared::start(hit_handler);
     net::link::start(
         server_uri,
         {
