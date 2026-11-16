@@ -48,6 +48,96 @@ Input::HitInfo s_last_hit = {};
 TickType_t s_last_drive_time = 0;
 TickType_t s_last_hit_time = 0;
 
+void tank_logic_task(void* arg);
+void connect_handler();
+void disconnect_handler();
+void text_handler(const char* data, size_t len);
+void hit_handler(uint8_t shooter, uint8_t shot);
+
+} // namespace
+
+void core::tank_logic::start(const char* server_uri, uint8_t tank_id) {
+    s_tank_id = tank_id;
+    s_input_queue = xQueueCreate(QueueSize, sizeof(Input));
+
+    if (!s_input_queue) {
+        ESP_LOGE(TAG, "xQueueCreate failed");
+        abort();
+    }
+    if (xTaskCreate(
+            tank_logic_task, "tank_logic", TaskStackSize, nullptr, TaskPriority, nullptr
+        ) != pdPASS) {
+        ESP_LOGE(TAG, "xTaskCreate failed");
+        abort();
+    }
+
+    hw::infrared::start(hit_handler);
+    net::link::start(
+        server_uri,
+        {
+            .connect_handler = connect_handler,
+            .disconnect_handler = disconnect_handler,
+            .text_handler = text_handler,
+        }
+    );
+}
+
+namespace {
+
+void stop_tank();
+void enqueue(const Input& input);
+void process_message(const Message& msg);
+void process_hit(const Input::HitInfo& hit);
+
+void tank_logic_task(void* arg) {
+    (void)arg;
+    while (true) {
+        auto wait_time = portMAX_DELAY;
+        if (s_moving) {
+            TickType_t elapsed = xTaskGetTickCount() - s_last_drive_time;
+            if (elapsed < DriveTimeout) {
+                wait_time = DriveTimeout - elapsed;
+            } else {
+                wait_time = 0;
+            }
+        }
+
+        Input input;
+        BaseType_t res = xQueueReceive(s_input_queue, &input, wait_time);
+
+        // xQueueReceive only times out when s_moving is true, otherwise it waits forever.
+        if (res != pdTRUE) {
+            ESP_LOGW(TAG, "no drive for 300 ms, stopping");
+            stop_tank();
+            continue;
+        }
+
+        // Handle the input.
+        switch (input.type) {
+            case Input::Type::Connect:
+                // Connect input wants to disable the tank since we want a known state
+                // before the server sends control messages.
+                [[fallthrough]];
+            case Input::Type::Disconnect:
+                // Disconnect input wants to disable the tank since we don't want the
+                // tank to keep moving when the server is disconnected.
+                s_enabled = false;
+                stop_tank();
+                break;
+            case Input::Type::Message:
+                process_message(input.msg);
+                break;
+            case Input::Type::Hit:
+                process_hit(input.hit);
+                break;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helper functions
+// ---------------------------------------------------------------------------
+
 void enqueue(const Input& input) {
     if (xQueueSend(s_input_queue, &input, 0) != pdTRUE) {
         ESP_LOGW(TAG, "input queue is full, dropped an input");
@@ -59,7 +149,7 @@ void stop_tank() {
     s_moving = false;
 }
 
-void handle_message(const Message& msg) {
+void process_message(const Message& msg) {
     switch (msg.type) {
         case Message::Type::State: {
             s_enabled = msg.enable;
@@ -98,7 +188,7 @@ void handle_message(const Message& msg) {
     }
 }
 
-void handle_hit(const Input::HitInfo& hit) {
+void process_hit(const Input::HitInfo& hit) {
     // The tank receiver may also see its own shot.
     if (hit.shooter == s_tank_id) {
         return;
@@ -118,50 +208,9 @@ void handle_hit(const Input::HitInfo& hit) {
     net::link::send_text(encode_hit(hit.shooter, hit.shot));
 }
 
-void tank_logic_task(void* arg) {
-    (void)arg;
-    while (true) {
-        auto wait_time = portMAX_DELAY;
-        if (s_moving) {
-            TickType_t elapsed = xTaskGetTickCount() - s_last_drive_time;
-            if (elapsed < DriveTimeout) {
-                wait_time = DriveTimeout - elapsed;
-            } else {
-                wait_time = 0;
-            }
-        }
-
-        Input input;
-        BaseType_t res = xQueueReceive(s_input_queue, &input, wait_time);
-
-        // xQueueReceive only times out when s_moving is true, otherwise it waits forever.
-        if (res != pdTRUE) {
-            ESP_LOGW(TAG, "no drive for 300 ms, stopping");
-            stop_tank();
-            continue;
-        }
-
-        // Handle the input.
-        switch (input.type) {
-            case Input::Type::Connect:
-                // Connect input wants to disable the tank since we want a known state
-                // before the server sends control messages.
-                [[fallthrough]];
-            case Input::Type::Disconnect:
-                // Disconnect input wants to disable the tank since we don't want the
-                // tank to keep moving when the server is disconnected.
-                s_enabled = false;
-                stop_tank();
-                break;
-            case Input::Type::Message:
-                handle_message(input.msg);
-                break;
-            case Input::Type::Hit:
-                handle_hit(input.hit);
-                break;
-        }
-    }
-}
+// ---------------------------------------------------------------------------
+// Handlers
+// ---------------------------------------------------------------------------
 
 void connect_handler() {
     net::link::send_text(encode_hello(s_tank_id));
@@ -197,29 +246,3 @@ void hit_handler(uint8_t shooter, uint8_t shot) {
 }
 
 } // namespace
-
-void core::tank_logic::start(const char* server_uri, uint8_t tank_id) {
-    s_tank_id = tank_id;
-    s_input_queue = xQueueCreate(QueueSize, sizeof(Input));
-
-    if (!s_input_queue) {
-        ESP_LOGE(TAG, "xQueueCreate failed");
-        abort();
-    }
-    if (xTaskCreate(
-            tank_logic_task, "tank_logic", TaskStackSize, nullptr, TaskPriority, nullptr
-        ) != pdPASS) {
-        ESP_LOGE(TAG, "xTaskCreate failed");
-        abort();
-    }
-
-    hw::infrared::start(hit_handler);
-    net::link::start(
-        server_uri,
-        {
-            .connect_handler = connect_handler,
-            .disconnect_handler = disconnect_handler,
-            .text_handler = text_handler,
-        }
-    );
-}

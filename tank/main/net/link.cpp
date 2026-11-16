@@ -29,7 +29,54 @@ net::link::Handlers s_handlers = {};
 // on every failed reconnect attempt. Therefore, we track the connection state ourselves.
 bool s_connected = false;
 
-// Handler sever's ping. Returns true if the message is a valid ping, false otherwise.
+void ws_event_handler(
+    void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data
+);
+
+} // namespace
+
+void net::link::start(const char* uri, const Handlers& handlers) {
+    s_handlers = handlers;
+
+    esp_websocket_client_config_t config = {};
+    config.uri = uri;
+    config.reconnect_timeout_ms = ReconnectTimeoutMs;
+    // We want to reconnect even after a clean close from the server.
+    config.enable_close_reconnect = true;
+    config.ping_interval_sec = PingIntervalSec;
+    config.pingpong_timeout_sec = PongTimeoutSec;
+
+    s_client = esp_websocket_client_init(&config);
+    if (!s_client) {
+        ESP_LOGE(TAG, "esp_websocket_client_init failed");
+        abort();
+    }
+    ESP_ERROR_CHECK(esp_websocket_register_events(
+        s_client, WEBSOCKET_EVENT_ANY, &ws_event_handler, nullptr
+    ));
+    ESP_ERROR_CHECK(esp_websocket_client_start(s_client));
+
+    ESP_LOGI(TAG, "connecting to %s", uri);
+}
+
+bool net::link::send_text(std::string_view text) {
+    if (!s_client || !esp_websocket_client_is_connected(s_client)) {
+        return false;
+    }
+
+    int sent = esp_websocket_client_send_text(
+        s_client, text.data(), static_cast<int>(text.size()), SendTimeout
+    );
+    if (sent < 0) {
+        ESP_LOGW(TAG, "send failed: %.*s", static_cast<int>(text.size()), text.data());
+        return false;
+    }
+    return true;
+}
+
+namespace {
+
+// Handle server's ping. Returns true if the message is a valid ping, false otherwise.
 bool handle_ping(const char* data, size_t len) {
     JsonPtr root(cJSON_ParseWithLength(data, len), &cJSON_Delete);
     const char* type =
@@ -118,42 +165,3 @@ void ws_event_handler(
 }
 
 } // namespace
-
-void net::link::start(const char* uri, const Handlers& handlers) {
-    s_handlers = handlers;
-
-    esp_websocket_client_config_t config = {};
-    config.uri = uri;
-    config.reconnect_timeout_ms = ReconnectTimeoutMs;
-    // We want to reconnect even after a clean close from the server.
-    config.enable_close_reconnect = true;
-    config.ping_interval_sec = PingIntervalSec;
-    config.pingpong_timeout_sec = PongTimeoutSec;
-
-    s_client = esp_websocket_client_init(&config);
-    if (!s_client) {
-        ESP_LOGE(TAG, "esp_websocket_client_init failed");
-        abort();
-    }
-    ESP_ERROR_CHECK(esp_websocket_register_events(
-        s_client, WEBSOCKET_EVENT_ANY, &ws_event_handler, nullptr
-    ));
-    ESP_ERROR_CHECK(esp_websocket_client_start(s_client));
-
-    ESP_LOGI(TAG, "connecting to %s", uri);
-}
-
-bool net::link::send_text(std::string_view text) {
-    if (!s_client || !esp_websocket_client_is_connected(s_client)) {
-        return false;
-    }
-
-    int sent = esp_websocket_client_send_text(
-        s_client, text.data(), static_cast<int>(text.size()), SendTimeout
-    );
-    if (sent < 0) {
-        ESP_LOGW(TAG, "send failed: %.*s", static_cast<int>(text.size()), text.data());
-        return false;
-    }
-    return true;
-}

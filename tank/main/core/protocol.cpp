@@ -12,60 +12,13 @@ namespace {
 
 using JsonPtr = std::unique_ptr<cJSON, decltype(&cJSON_Delete)>;
 
-// Returns root[key] if it is a string, std::nullopt otherwise.
-std::optional<std::string_view> get_string(const cJSON* root, const char* key) {
-    const char* value = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(root, key));
-    if (!value) {
-        return std::nullopt;
-    }
-    return value;
-}
+// The value must be within [min, max]. Decimals will be truncated.
+std::optional<int> get_int(const cJSON* root, const char* key, int min, int max);
+std::optional<bool> get_bool(const cJSON* root, const char* key);
+std::optional<std::string_view> get_string(const cJSON* root, const char* key);
 
-// Returns root[key] if it is a number in [min, max], std::nullopt otherwise.
-// Decimals will be truncated.
-std::optional<int> get_int(const cJSON* root, const char* key, int min, int max) {
-    cJSON* item = cJSON_GetObjectItemCaseSensitive(root, key);
-    if (!cJSON_IsNumber(item)) {
-        return std::nullopt;
-    }
-
-    // Check the range before converting since we don't want to convert an out-of-range
-    // double to int
-    double value = cJSON_GetNumberValue(item);
-    if (value < min || value > max) {
-        return std::nullopt;
-    }
-
-    return static_cast<int>(value);
-}
-
-// Returns root[key] if it is a bool, std::nullopt otherwise.
-std::optional<bool> get_bool(const cJSON* root, const char* key) {
-    cJSON* item = cJSON_GetObjectItemCaseSensitive(root, key);
-    if (!cJSON_IsBool(item)) {
-        return std::nullopt;
-    }
-    return cJSON_IsTrue(item);
-}
-
-Message::Type to_type(std::string_view name) {
-    if (name == "error") return Message::Type::Error;
-    if (name == "state") return Message::Type::State;
-    if (name == "drive") return Message::Type::Drive;
-    if (name == "fire") return Message::Type::Fire;
-    if (name == "event") return Message::Type::Event;
-    return Message::Type::Unknown;
-}
-
-std::optional<Message::Event> to_event(std::string_view kind) {
-    if (kind == "game_start") return Message::Event::GameStart;
-    if (kind == "game_end") return Message::Event::GameEnd;
-    if (kind == "respawn") return Message::Event::Respawn;
-    if (kind == "hurt") return Message::Event::Hurt;
-    if (kind == "death") return Message::Event::Death;
-    if (kind == "hit_confirm") return Message::Event::HitConfirm;
-    return std::nullopt;
-}
+Message::Type to_type(std::string_view name);
+std::optional<Message::Event> to_event_type(std::string_view kind);
 
 } // namespace
 
@@ -124,7 +77,7 @@ std::optional<Message> core::protocol::parse(const char* data, size_t len) {
                 return std::nullopt;
             }
             // Ignore unknown kinds
-            auto event = to_event(*kind);
+            auto event = to_event_type(*kind);
             if (!event) {
                 msg.type = Message::Type::Unknown;
                 break;
@@ -145,3 +98,58 @@ std::string core::protocol::encode_hit(uint8_t shooter, uint8_t shot) {
     return R"({"type":"hit","shooter":)" + std::to_string(shooter) + R"(,"shot":)" +
            std::to_string(shot) + "}";
 }
+
+namespace {
+
+std::optional<int> get_int(const cJSON* root, const char* key, int min, int max) {
+    cJSON* item = cJSON_GetObjectItemCaseSensitive(root, key);
+    if (!cJSON_IsNumber(item)) {
+        return std::nullopt;
+    }
+
+    // Check the range before converting since we don't want to convert an out-of-range
+    // double to int
+    double value = cJSON_GetNumberValue(item);
+    if (value < min || value > max) {
+        return std::nullopt;
+    }
+
+    return static_cast<int>(value);
+}
+
+std::optional<bool> get_bool(const cJSON* root, const char* key) {
+    cJSON* item = cJSON_GetObjectItemCaseSensitive(root, key);
+    if (!cJSON_IsBool(item)) {
+        return std::nullopt;
+    }
+    return cJSON_IsTrue(item);
+}
+
+std::optional<std::string_view> get_string(const cJSON* root, const char* key) {
+    const char* value = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(root, key));
+    if (!value) {
+        return std::nullopt;
+    }
+    return value;
+}
+
+Message::Type to_type(std::string_view name) {
+    if (name == "error") return Message::Type::Error;
+    if (name == "state") return Message::Type::State;
+    if (name == "drive") return Message::Type::Drive;
+    if (name == "fire") return Message::Type::Fire;
+    if (name == "event") return Message::Type::Event;
+    return Message::Type::Unknown;
+}
+
+std::optional<Message::Event> to_event_type(std::string_view kind) {
+    if (kind == "game_start") return Message::Event::GameStart;
+    if (kind == "game_end") return Message::Event::GameEnd;
+    if (kind == "respawn") return Message::Event::Respawn;
+    if (kind == "hurt") return Message::Event::Hurt;
+    if (kind == "death") return Message::Event::Death;
+    if (kind == "hit_confirm") return Message::Event::HitConfirm;
+    return std::nullopt;
+}
+
+} // namespace
