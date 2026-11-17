@@ -1,4 +1,4 @@
-"""Expected protocol, feature, and unresolved-policy errors."""
+"""Expected operation and protocol errors."""
 
 
 class OperationError(Exception):
@@ -8,10 +8,6 @@ class OperationError(Exception):
 class ProtocolError(OperationError):
     """The incoming message does not match the client's role or schema."""
 
-
-class DecisionRequired(OperationError):
-    """The protocol needs clarification before this operation can be implemented."""
-
-
-class FeatureNotImplemented(OperationError):
-    """The message belongs to a later development milestone."""
+    def __init__(self, message: str, *, message_type: str | None = None) -> None:
+        super().__init__(message)
+        self.message_type = message_type

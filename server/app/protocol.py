@@ -54,6 +54,10 @@ class Fire(Message):
     type: Literal["fire"]
 
 
+class TankFire(Fire):
+    shot: ShotId
+
+
 class Hit(Message):
     type: Literal["hit"]
     shooter: TankId
@@ -83,6 +87,21 @@ class TankState(Message):
 class TankEvent(Message):
     type: Literal["event"] = "event"
     kind: Literal["hurt", "death", "hit_confirm", "respawn", "game_start", "game_end"]
+
+
+class HitEvent(Message):
+    type: Literal["event"] = "event"
+    kind: Literal["hit"] = "hit"
+    shooter: TankId
+    target: TankId
+    hp: Annotated[int, Field(ge=0, le=5)]
+
+
+class KillEvent(Message):
+    type: Literal["event"] = "event"
+    kind: Literal["kill"] = "kill"
+    shooter: TankId
+    target: TankId
 
 
 class TankSnapshot(Message):
@@ -132,17 +151,17 @@ def parse_message(role: Role, text: str, *, registered: bool) -> Message:
     kind = payload["type"]
     if not registered:
         if kind != "hello":
-            raise ProtocolError("连接后的第一条消息必须是 hello")
+            raise ProtocolError("连接后的第一条消息必须是 hello", message_type=kind)
         model = HELLO_MODELS[role]
     else:
         model = INBOUND_MODELS[role].get(kind)
         if model is None:
-            raise ProtocolError(f"{role.value} 连接不允许发送 {kind} 消息")
+            raise ProtocolError(f"{role.value} 连接不允许发送 {kind} 消息", message_type=kind)
     try:
         return model.model_validate(payload)
     except ValidationError as exc:
         location = ".".join(str(part) for part in exc.errors()[0]["loc"])
-        raise ProtocolError(f"消息字段不符合协议：{location}") from exc
+        raise ProtocolError(f"消息字段不符合协议：{location}", message_type=kind) from exc
 
 
 def as_payload(message: Message) -> dict[str, Any]:
