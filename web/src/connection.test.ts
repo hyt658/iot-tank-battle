@@ -58,8 +58,11 @@ describe("real WebSocket transport", () => {
       false,
     );
     expect(conn.send({ type: "fire" })).toBe(false);
-    expect(conn.send({ type: "match_control", action: "start" })).toBe(true);
-    expect(ws.sent).toHaveLength(2);
+    expect(conn.send({ type: "game", action: "start" })).toBe(true);
+    expect(JSON.parse(ws.sent[1])).toEqual({ type: "game", action: "start" });
+    expect(conn.send({ type: "game", action: "reset" })).toBe(true);
+    expect(JSON.parse(ws.sent[2])).toEqual({ type: "game", action: "reset" });
+    expect(ws.sent).toHaveLength(3);
     conn.close();
   });
   it("registers, replies to JSON heartbeat, then requires state before marking ready", () => {
@@ -74,6 +77,7 @@ describe("real WebSocket transport", () => {
       name: "Pilot",
     });
     expect(callbacks.status).not.toHaveBeenCalledWith("connected");
+    expect(conn.send({ type: "game", action: "start" })).toBe(false);
     ws.receive({ type: "ping", ts: 987 });
     expect(JSON.parse(ws.sent[1])).toEqual({ type: "pong", ts: 987 });
     ws.receive(new MockArena().snapshot());

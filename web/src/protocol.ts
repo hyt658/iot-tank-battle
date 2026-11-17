@@ -1,4 +1,4 @@
-/** Browser-facing contract from the supplied PROTOCOL(1).md. */
+/** Browser-facing contract from the supplied PROTOCOL(2).md. */
 export type TankId = 1 | 2;
 export type Role = "player" | "spectator";
 export type MatchStatus = "lobby" | "countdown" | "running" | "ended";
@@ -39,7 +39,7 @@ export type ClientMessage =
   | { type: "hello"; tank_id?: TankId; name?: string }
   | { type: "pong"; ts: number }
   | { type: "fire" }
-  | { type: "match_control"; action: "start" | "reset" };
+  | { type: "game"; action: "start" | "reset" };
 export interface ConnectionSettings {
   demo: boolean;
   server: string;
@@ -128,7 +128,7 @@ export function hello(settings: ConnectionSettings): ClientMessage {
 export function allowedMessage(role: Role, message: ClientMessage): boolean {
   if (message.type === "drive" || message.type === "fire")
     return role === "player";
-  if (message.type === "match_control") return role === "spectator";
+  if (message.type === "game") return role === "spectator";
   return true;
 }
 export function canDrive(state: StateMessage | null, tankId: TankId): boolean {

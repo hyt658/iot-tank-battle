@@ -3,18 +3,26 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useControls } from "./hooks";
-import type { ClientMessage } from "./protocol";
+import type { ClientMessage, MatchStatus } from "./protocol";
 
 let root: Root;
 let host: HTMLDivElement;
 const send = vi.fn((_message: ClientMessage) => true);
 const fire = vi.fn();
-function Harness({ enabled = true }: { enabled?: boolean }) {
-  useControls(enabled, send, fire);
+function Harness({
+  enabled = true,
+  status = "lobby",
+}: {
+  enabled?: boolean;
+  status?: MatchStatus;
+}) {
+  const { drive, setAngle } = useControls(enabled, send, fire, status);
   return (
     <>
       <button>Navigation</button>
       <input aria-label="Name" />
+      <button onClick={() => setAngle(45)}>Aim right</button>
+      <output>{drive.turret}</output>
     </>
   );
 }
@@ -43,6 +51,41 @@ function key(code: string, type = "keydown", target: EventTarget = window) {
 }
 const last = () => send.mock.calls.at(-1)?.[0];
 describe("driver safety and timing", () => {
+  it("recenters on match start, preserving aim on later running snapshots and respawn", () => {
+    const aim = () => act(() => host.querySelectorAll("button")[1].click());
+    aim();
+    expect(host.querySelector("output")!.textContent).toBe("45");
+    act(() => root.render(<Harness enabled={false} status="countdown" />));
+    expect(host.querySelector("output")!.textContent).toBe("45");
+    send.mockClear();
+    act(() => root.render(<Harness status="running" />));
+    expect(host.querySelector("output")!.textContent).toBe("0");
+    act(() => vi.advanceTimersByTime(50));
+    expect(last()).toEqual({ type: "drive", left: 0, right: 0, turret: 0 });
+    aim();
+    act(() => root.render(<Harness status="running" />));
+    act(() => vi.advanceTimersByTime(50));
+    expect(last()).toMatchObject({ turret: 45 });
+    act(() => root.render(<Harness enabled={false} status="running" />));
+    act(() => root.render(<Harness status="running" />));
+    act(() => vi.advanceTimersByTime(50));
+    expect(last()).toMatchObject({ turret: 45 });
+    act(() => root.render(<Harness enabled={false} status="countdown" />));
+    act(() => root.render(<Harness status="running" />));
+    act(() => vi.advanceTimersByTime(50));
+    expect(last()).toMatchObject({ turret: 0 });
+  });
+  it("recenters while paused and sends the centered angle when control resumes", () => {
+    act(() => host.querySelectorAll("button")[1].click());
+    act(() => root.render(<Harness enabled={false} status="countdown" />));
+    send.mockClear();
+    act(() => root.render(<Harness enabled={false} status="running" />));
+    expect(host.querySelector("output")!.textContent).toBe("0");
+    expect(send).not.toHaveBeenCalled();
+    act(() => root.render(<Harness status="running" />));
+    act(() => vi.advanceTimersByTime(50));
+    expect(last()).toMatchObject({ left: 0, right: 0, turret: 0 });
+  });
   it("sends repeated drive at 20 Hz even when input does not change", () => {
     key("KeyW");
     act(() => vi.advanceTimersByTime(1000));

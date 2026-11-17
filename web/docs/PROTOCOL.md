@@ -45,26 +45,40 @@ ws.onmessage = (e) => {
 
 ## 3. 所有消息一览
 
+**所有连接都有：**
+
 | 消息 | 谁发 | 谁收 | 什么时候发 |
 |---|---|---|---|
 | `hello` | 坦克、控制页、计分页 | 服务器 | 连上后的第一条消息 |
 | `ping` | 服务器 | 坦克、控制页、计分页 | 每秒一次 |
 | `pong` | 坦克、控制页、计分页 | 服务器 | 收到 `ping` 后立刻回 |
 | `error` | 服务器 | 坦克、控制页、计分页 | 操作失败时 |
-| `drive` | 控制页 | 服务器 | 每秒 20 次 |
+
+**坦克连接（`/ws/tank`）：**
+
+| 消息 | 谁发 | 谁收 | 什么时候发 |
+|---|---|---|---|
 | `drive` | 服务器 | 坦克 | 收到控制页的 `drive` 后转发 |
-| `fire` | 控制页 | 服务器 | 玩家按开火键时 |
 | `fire` | 服务器 | 坦克 | 开火检查通过后 |
 | `hit` | 坦克 | 服务器 | 收到对方的 IR 信号时 |
-| `mode` | 服务器 | 坦克 | 连接成功时，以及坦克能否行动发生变化时 |
-| `effect` | 服务器 | 坦克 | 需要响蜂鸣器时 |
+| `state` | 服务器 | 坦克 | 连接成功时，以及坦克的状态发生变化时 |
+| `event` | 服务器 | 坦克 | 发生和这台坦克有关的事时 |
+
+**网页连接（`/ws/player`、`/ws/spectator`）：**
+
+| 消息 | 谁发 | 谁收 | 什么时候发 |
+|---|---|---|---|
+| `drive` | 控制页 | 服务器 | 每秒 20 次 |
+| `fire` | 控制页 | 服务器 | 玩家按开火键时 |
 | `state` | 服务器 | 控制页、计分页 | 连接成功时、每 200 ms、数据变化时 |
 | `event` | 服务器 | 控制页、计分页 | 有命中或击杀时 |
-| `match_control` | 计分页 | 服务器 | 点开始或重置按钮时 |
+| `game` | 计分页 | 服务器 | 点开始或重置按钮时 |
 
 ## 4. 每条消息的格式
 
-### `hello`：告诉服务器我是谁
+### 4.1 所有连接都有的消息
+
+#### `hello`：告诉服务器我是谁
 
 ```json
 {"type":"hello","tank_id":1}
@@ -79,13 +93,13 @@ ws.onmessage = (e) => {
 | `tank_id` | 整数 | `1` 或 `2`。坦克填自己的编号，控制页填要控制的坦克，计分页不填 |
 | `name` | 字符串 | 玩家名字，只有控制页填 |
 
-成功后，坦克会收到 `mode`，网页会收到 `state`。
+成功后，坦克和网页都会收到各自的 `state`。
 
 失败时服务器发 `error` 并断开连接，比如 `tank_id` 不存在，或这台坦克已经有人控制。
 
 同一台坦克重连时，新连接顶掉旧连接。
 
-### `ping` 和 `pong`：检查连接是否还在
+#### `ping` 和 `pong`：检查连接是否还在
 
 ```json
 {"type":"ping","ts":123456}
@@ -98,7 +112,7 @@ ws.onmessage = (e) => {
 
 3 秒没收到对方的消息就算断线。客户端断线后每秒重连一次。
 
-### `error`：告诉客户端操作失败了
+#### `error`：告诉客户端操作失败了
 
 ```json
 {"type":"error","message":"没有弹药"}
@@ -108,13 +122,17 @@ ws.onmessage = (e) => {
 |---|---|---|
 | `message` | 字符串 | 失败原因，直接显示或打印 |
 
-### `drive`：控制履带和炮塔
+### 4.2 控制坦克的消息（控制页 → 服务器 → 坦克）
+
+`drive` 和 `fire` 两条连接上都有，所以放在一起说明。
+
+#### `drive`：控制履带和炮塔
 
 ```json
 {"type":"drive","left":60,"right":-60,"turret":-15}
 ```
 
-控制页发给服务器，服务器原样转发给坦克。坦克是 `locked` 时，服务器直接丢弃。
+控制页发给服务器，服务器原样转发给坦克。坦克 `state` 里的 `enable` 为 `false` 时，服务器直接丢弃。
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
@@ -133,13 +151,14 @@ ws.onmessage = (e) => {
 
 - 输入没变也要固定每秒发 20 次。
 - 窗口失焦时马上发一次 `left` 和 `right` 都为 `0` 的 `drive`，防止按键松开的事件丢失。
+- 收到的 `state` 里 `status` 变成 `running` 时，把炮塔角度设回 `0`。炮塔角度只由控制页决定，坦克不会自己回正，否则下一条 `drive` 又会把它转回去。
 
 坦克要做到：
 
 - 收到后更新电机和舵机。
 - 300 ms 没收到 `drive` 或断线时，立刻停车。
 
-### `fire`：开火
+#### `fire`：开火
 
 控制页发给服务器，没有其他字段：
 
@@ -149,7 +168,7 @@ ws.onmessage = (e) => {
 
 服务器按以下条件检查：
 
-- 坦克在线，而且是 `active`。
+- 坦克在线，而且坦克 `state` 里的 `enable` 为 `true`。
 - 距离上次开火至少 1 秒。
 - 弹药大于 0。练习模式不检查这一条。
 
@@ -165,7 +184,9 @@ ws.onmessage = (e) => {
 
 坦克收到后，把自己的 `tank_id` 和 `shot` 编进 IR 信号发射出去。
 
-### `hit`：报告自己被打中
+### 4.3 坦克连接上的消息
+
+#### `hit`：报告自己被打中
 
 ```json
 {"type":"hit","shooter":2,"shot":7}
@@ -180,35 +201,42 @@ ws.onmessage = (e) => {
 
 同一发子弹只报一次，自己打的不报。
 
-### `mode`：告诉坦克现在能不能行动
+#### `state`（坦克）：坦克现在的状态
 
 ```json
-{"type":"mode","mode":"active"}
+{"type":"state","enable":true}
 ```
 
-| `mode` 的值 | 坦克要做什么 |
-|---|---|
-| `active` | 正常执行 `drive` 和 `fire` |
-| `locked` | 立刻停车，忽略 `drive` 和 `fire`，但照常回 `pong` 和报 `hit` |
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `enable` | 布尔值 | `true`：正常执行 `drive` 和 `fire`。`false`：立刻停车，忽略 `drive` 和 `fire`，但照常回 `pong` 和报 `hit` |
 
-坦克开机和重连后默认是 `locked`。
+连接成功时发一次，之后有字段变化时再发一份完整的。坦克只看最新的一份。
 
-### `effect`：让坦克响蜂鸣器
+坦克开机和重连后，收到第一份 `state` 之前按 `enable` 为 `false` 处理。
+
+`enable` 由服务器根据比赛阶段和坦克是否活着决定（见第 6 节），坦克不自己推算。
+
+#### `event`（坦克）：告诉坦克发生了和它有关的事
 
 ```json
-{"type":"effect","name":"hit"}
+{"type":"event","kind":"hurt"}
 ```
 
-| `name` 的值 | 含义 |
+| `kind` 的值 | 含义 |
 |---|---|
-| `hit` | 自己被打中 |
-| `destroyed` | 自己被击毁 |
-| `confirm` | 自己打中了别人 |
+| `hurt` | 自己被打中了 |
+| `death` | 自己被击毁了 |
+| `hit_confirm` | 自己打中了别人，击毁对方的那一发也发这个 |
 | `respawn` | 自己复活了 |
-| `match_start` | 比赛开始 |
-| `match_end` | 比赛结束 |
+| `game_start` | 比赛开始了 |
+| `game_end` | 比赛结束了 |
 
-### `state`：当前完整的比赛数据
+服务器只告诉坦克发生了什么，怎么反应（比如响哪段声音）由坦克自己决定。坦克遇到不认识的 `kind` 会直接忽略，所以以后可以放心加新的。
+
+### 4.4 网页连接上的消息
+
+#### `state`（网页）：当前完整的比赛数据
 
 网页直接用它刷新界面，不用自己计算血量和弹药。
 
@@ -246,7 +274,7 @@ ws.onmessage = (e) => {
 | `deaths` | 整数 | 死亡数 |
 | `respawn_ms` | 整数 | 还有多少毫秒复活，活着时为 `0` |
 
-### `event`：显示击杀提示
+#### `event`（网页）：显示击杀提示
 
 ```json
 {"type":"event","kind":"hit","shooter":1,"target":2,"hp":3}
@@ -260,11 +288,11 @@ ws.onmessage = (e) => {
 | `target` | 整数 | 被打中的坦克 |
 | `hp` | 整数 | 目标剩余血量，只有 `hit` 才有 |
 
-### `match_control`：开始或重置比赛
+#### `game`：开始或重置比赛
 
 ```json
-{"type":"match_control","action":"start"}
-{"type":"match_control","action":"reset"}
+{"type":"game","action":"start"}
+{"type":"game","action":"reset"}
 ```
 
 | `action` 的值 | 含义 |
@@ -278,7 +306,7 @@ ws.onmessage = (e) => {
 
 ```text
 坦克1 → 服务器    {"type":"hello","tank_id":1}
-服务器 → 坦克1    {"type":"mode","mode":"active"}
+服务器 → 坦克1    {"type":"state","enable":true}
 控制页 → 服务器   {"type":"hello","tank_id":1,"name":"Yutao"}
 服务器 → 控制页   {"type":"state","status":"lobby", ...}
 ```
@@ -286,13 +314,13 @@ ws.onmessage = (e) => {
 **开始比赛：**
 
 ```text
-计分页 → 服务器   {"type":"match_control","action":"start"}
-服务器 → 坦克     {"type":"mode","mode":"locked"}
+计分页 → 服务器   {"type":"game","action":"start"}
+服务器 → 坦克     {"type":"state","enable":false}
 服务器 → 网页     {"type":"state","status":"countdown","time_left_ms":3000, ...}
 
 3 秒后：
-服务器 → 坦克     {"type":"mode","mode":"active"}
-服务器 → 坦克     {"type":"effect","name":"match_start"}
+服务器 → 坦克     {"type":"state","enable":true}
+服务器 → 坦克     {"type":"event","kind":"game_start"}
 服务器 → 网页     {"type":"state","status":"running", ...}
 ```
 
@@ -310,8 +338,8 @@ ws.onmessage = (e) => {
 服务器 → 坦克1    {"type":"fire","shot":3}
 坦克1 → 坦克2     红外信号（不经过 Wi-Fi）
 坦克2 → 服务器    {"type":"hit","shooter":1,"shot":3}
-服务器 → 坦克2    {"type":"effect","name":"hit"}
-服务器 → 坦克1    {"type":"effect","name":"confirm"}
+服务器 → 坦克2    {"type":"event","kind":"hurt"}
+服务器 → 坦克1    {"type":"event","kind":"hit_confirm"}
 服务器 → 网页     {"type":"event","kind":"hit","shooter":1,"target":2,"hp":3}
 服务器 → 网页     {"type":"state", ...}
 ```
@@ -319,26 +347,26 @@ ws.onmessage = (e) => {
 **坦克 2 被击毁并复活：**
 
 ```text
-服务器 → 坦克2    {"type":"effect","name":"destroyed"}
-服务器 → 坦克2    {"type":"mode","mode":"locked"}
-服务器 → 坦克1    {"type":"effect","name":"confirm"}
+服务器 → 坦克2    {"type":"event","kind":"death"}
+服务器 → 坦克2    {"type":"state","enable":false}
+服务器 → 坦克1    {"type":"event","kind":"hit_confirm"}
 服务器 → 网页     {"type":"event","kind":"kill","shooter":1,"target":2}
 服务器 → 网页     {"type":"state", ...}
 
 5 秒后：
-服务器 → 坦克2    {"type":"mode","mode":"active"}
-服务器 → 坦克2    {"type":"effect","name":"respawn"}
+服务器 → 坦克2    {"type":"state","enable":true}
+服务器 → 坦克2    {"type":"event","kind":"respawn"}
 服务器 → 网页     {"type":"state", ...}
 ```
 
 ## 6. 比赛阶段
 
-| `status` | 坦克的 `mode` | 说明 |
+| `status` | 坦克的 `enable` | 说明 |
 |---|---|---|
-| `lobby` | `active` | 练习模式，可以开车和开火，不扣血也不耗弹 |
-| `countdown` | `locked` | 倒计时 3 秒 |
-| `running` | 活着 `active`，死了 `locked` | 正式比赛 |
-| `ended` | `locked` | 显示结果，等待 `reset` |
+| `lobby` | `true` | 练习模式，可以开车和开火，不扣血也不耗弹 |
+| `countdown` | `false` | 倒计时 3 秒 |
+| `running` | 活着 `true`，死了 `false` | 正式比赛 |
+| `ended` | `false` | 显示结果，等待 `reset` |
 
 ## 7. 命中判定
 

@@ -55,7 +55,7 @@ export class MockArena {
     }
     if (message.type === "fire" && settings.role === "player")
       this.fire(settings.tankId, now);
-    if (message.type === "match_control") {
+    if (message.type === "game") {
       if (settings.role !== "spectator") {
         this.error("请在观战计分页管理比赛");
         return;

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { openDemo, openSocket } from "./connection";
 import type { Connection } from "./connection";
 import { driveFromKeys, isEditing, movementKeys } from "./controls";
@@ -8,6 +8,7 @@ import type {
   ConnectionSettings,
   ConnectionStatus,
   Drive,
+  MatchStatus,
   StateMessage,
 } from "./protocol";
 
@@ -84,6 +85,7 @@ export function useControls(
   enabled: boolean,
   send: (m: ClientMessage) => boolean,
   fire: () => void,
+  matchStatus?: MatchStatus,
 ) {
   const [drive, setDrive] = useState<Drive>({
     type: "drive",
@@ -93,6 +95,7 @@ export function useControls(
   });
   const keys = useRef(new Set<string>());
   const angle = useRef(0);
+  const previousStatus = useRef<MatchStatus | undefined>(undefined);
   const focused = useRef(true);
   const fireRef = useRef(fire);
   fireRef.current = fire;
@@ -111,6 +114,14 @@ export function useControls(
     angle.current = Math.round(Math.max(-90, Math.min(90, value)));
     setDrive((d) => ({ ...d, turret: angle.current }));
   }, []);
+  // Recenter once on entering running, before the next 20 Hz drive tick.
+  // Subsequent state snapshots and respawns must preserve the player's aim.
+  useLayoutEffect(() => {
+    if (matchStatus === "running" && previousStatus.current !== "running") {
+      setAngle(0);
+    }
+    previousStatus.current = matchStatus;
+  }, [matchStatus, setAngle]);
   const setKey = useCallback(
     (key: string, down: boolean) => {
       if (!enabled) return;

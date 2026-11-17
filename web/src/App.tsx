@@ -258,7 +258,7 @@ export default function App() {
       setLastShot(shotRef.current);
     }
   };
-  const controls = useControls(enabled, send, fire);
+  const controls = useControls(enabled, send, fire, state?.status);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 100);
     return () => clearInterval(timer);
@@ -684,7 +684,7 @@ export default function App() {
                     disabled={!startReady}
                     onClick={() => {
                       setResetConfirm(false);
-                      send({ type: "match_control", action: "start" });
+                      send({ type: "game", action: "start" });
                     }}
                   >
                     <Play size={17} />
@@ -788,7 +788,7 @@ export default function App() {
             <button
               className="primary"
               onClick={() => {
-                send({ type: "match_control", action: "reset" });
+                send({ type: "game", action: "reset" });
                 setResetConfirm(false);
               }}
             >

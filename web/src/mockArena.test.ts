@@ -10,7 +10,7 @@ const spectator = {
 function start() {
   const arena = new MockArena();
   arena.botEnabled = false;
-  arena.command({ type: "match_control", action: "start" }, spectator, 0);
+  arena.command({ type: "game", action: "start" }, spectator, 0);
   arena.tick(3000);
   return arena;
 }
@@ -29,19 +29,19 @@ describe("simulated match", () => {
   it("only lets spectators start and resets after confirmation", () => {
     const arena = new MockArena();
     arena.command(
-      { type: "match_control", action: "start" },
+      { type: "game", action: "start" },
       { ...spectator, role: "player" },
       0,
     );
     expect(arena.state.status).toBe("lobby");
-    arena.command({ type: "match_control", action: "start" }, spectator, 0);
+    arena.command({ type: "game", action: "start" }, spectator, 0);
     expect(arena.state.status).toBe("countdown");
     arena.tick(2999);
     expect(arena.state.time_left_ms).toBe(1);
     arena.tick(3000);
     expect(arena.state.status).toBe("running");
     expect(arena.state.time_left_ms).toBe(180000);
-    arena.command({ type: "match_control", action: "reset" }, spectator, 4000);
+    arena.command({ type: "game", action: "reset" }, spectator, 4000);
     expect(arena.state.status).toBe("lobby");
     expect(arena.state.tanks[0].kills).toBe(0);
   });
