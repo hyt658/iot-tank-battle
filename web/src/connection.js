@@ -1,32 +1,92 @@
-import {
-  allowedMessage,
-  hello,
-  parseServerMessage,
-  socketUrl,
-} from "./protocol";
-import type {
-  ClientMessage,
-  ConnectionSettings,
-  ConnectionStatus,
-  ServerMessage,
-} from "./protocol";
-import { MockArena } from "./mockArena";
+import { MockArena } from "./mockArena.js";
 
-export interface Connection {
-  send(message: ClientMessage): boolean;
-  close(): void;
+const record = (v) => typeof v === "object" && v !== null;
+const integer = (v, min = 0, max = Number.MAX_SAFE_INTEGER) =>
+  typeof v === "number" && Number.isSafeInteger(v) && v >= min && v <= max;
+const id = (v) => v === 1 || v === 2;
+function isTank(v) {
+  return (
+    record(v) &&
+    id(v.id) &&
+    (v.player === null || typeof v.player === "string") &&
+    typeof v.online === "boolean" &&
+    typeof v.alive === "boolean" &&
+    integer(v.hp, 0, 5) &&
+    integer(v.ammo, 0, 10) &&
+    integer(v.kills) &&
+    integer(v.deaths) &&
+    integer(v.respawn_ms)
+  );
 }
-export interface Callbacks {
-  status(status: ConnectionStatus): void;
-  message(message: ServerMessage): void;
+export function parseServerMessage(text) {
+  let v;
+  try {
+    v = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!record(v)) return null;
+  if (v.type === "ping" && integer(v.ts)) return v;
+  if (v.type === "error" && typeof v.message === "string") return v;
+  if (
+    v.type === "state" &&
+    ["lobby", "countdown", "running", "ended"].includes(String(v.status)) &&
+    integer(v.time_left_ms) &&
+    (v.winner === null || id(v.winner)) &&
+    Array.isArray(v.tanks) &&
+    v.tanks.length === 2 &&
+    v.tanks.every(isTank) &&
+    new Set(v.tanks.map((t) => t.id)).size === 2
+  )
+    return v;
+  if (
+    v.type === "event" &&
+    id(v.shooter) &&
+    id(v.target) &&
+    v.shooter !== v.target &&
+    (v.kind === "kill" || (v.kind === "hit" && integer(v.hp, 0, 5)))
+  )
+    return v;
+  return null;
 }
+export function socketUrl(base, role) {
+  const url = new URL(base.trim());
+  if (url.protocol === "http:") url.protocol = "ws:";
+  if (url.protocol === "https:") url.protocol = "wss:";
+  if (!["ws:", "wss:"].includes(url.protocol) || url.username || url.password)
+    throw new Error("请输入有效的 ws:// 或 wss:// 服务器地址");
+  url.pathname = `/ws/${role}`;
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}
+export function hello(settings) {
+  return settings.role === "spectator"
+    ? { type: "hello" }
+    : {
+        type: "hello",
+        tank_id: settings.tankId,
+        name: settings.name.trim() || "Player",
+      };
+}
+export function allowedMessage(role, message) {
+  if (message.type === "drive" || message.type === "fire")
+    return role === "player";
+  if (message.type === "game") return role === "spectator";
+  return true;
+}
+export function canDrive(state, tankId) {
+  const tank = state?.tanks.find((t) => t.id === tankId);
+  return (
+    !!tank?.online &&
+    !!tank.alive &&
+    (state?.status === "lobby" || state?.status === "running")
+  );
+}
+
 // One simulation per tab. Switching player/spectator keeps the same match.
 export const demoArena = new MockArena();
-
-export function openDemo(
-  settings: ConnectionSettings,
-  callbacks: Callbacks,
-): Connection {
+export function openDemo(settings, callbacks) {
   let closed = false;
   const deliver = () => {
     if (closed) return;
@@ -57,11 +117,7 @@ export function openDemo(
     },
   };
 }
-
-export function openSocket(
-  settings: ConnectionSettings,
-  callbacks: Callbacks,
-): Connection {
+export function openSocket(settings, callbacks) {
   const url = socketUrl(settings.server, settings.role);
   if (
     typeof location !== "undefined" &&
@@ -71,14 +127,14 @@ export function openSocket(
     throw new Error(
       "HTTPS 页面需要 wss://；本地树莓派 ws:// 请从 HTTP 页面连接",
     );
-  let ws: WebSocket | null = null;
+  let ws = null;
   let stopped = false;
-  let retry: ReturnType<typeof setTimeout> | undefined;
-  let watchdog: ReturnType<typeof setInterval> | undefined;
+  let retry;
+  let watchdog;
   let lastReceived = 0;
   let hasState = false;
   let rejectHello = false;
-  const send = (message: ClientMessage): boolean => {
+  const send = (message) => {
     if (
       stopped ||
       !allowedMessage(settings.role, message) ||

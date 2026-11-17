@@ -11,6 +11,109 @@
   --orange: #f6ae7d;
   color-scheme: dark;
 }
+
+/* 两个页面共用一组坦克状态和动态列表。 */
+.battle-grid {
+  display: grid;
+  gap: 20px;
+  align-items: start;
+}
+.battle-grid.pilot {
+  grid-template-columns: minmax(235px, 1fr) minmax(340px, 1.5fr) minmax(
+      235px,
+      1fr
+    );
+}
+.battle-grid.pilot .first-tank {
+  grid-column: 1;
+  grid-row: 1;
+}
+.battle-grid.pilot .second-tank {
+  grid-column: 3;
+  grid-row: 1;
+}
+.battle-grid.pilot .aim-panel {
+  grid-column: 2;
+  grid-row: 1 / 3;
+}
+.battle-grid.pilot .drive-panel {
+  grid-column: 1;
+  grid-row: 2;
+}
+.battle-grid.pilot .feed {
+  grid-column: 3;
+  grid-row: 2;
+}
+.battle-grid.spectator {
+  grid-template-columns: 1fr 1fr;
+  gap: 22px;
+}
+.battle-grid.spectator .tank-card {
+  padding: 25px 32px 0;
+}
+.battle-grid.spectator .match-management {
+  grid-column: 1;
+}
+.battle-grid.spectator .feed {
+  grid-column: 2;
+}
+.brand-mark {
+  font-size: 28px;
+}
+.header-tools .icon-button {
+  min-width: 30px;
+  font-size: 20px;
+}
+@media (max-width: 1150px) {
+  .battle-grid.pilot {
+    grid-template-columns: minmax(210px, 1fr) minmax(300px, 1.4fr) minmax(
+        210px,
+        1fr
+      );
+    gap: 13px;
+  }
+}
+@media (max-width: 850px) {
+  .battle-grid.pilot {
+    grid-template-columns: 1fr 1.25fr;
+  }
+  .battle-grid.pilot .second-tank {
+    grid-column: 1;
+    grid-row: 3;
+  }
+  .battle-grid.pilot .feed {
+    grid-column: 2;
+    grid-row: 3;
+  }
+  .battle-grid.spectator .tank-card {
+    padding: 20px 22px 0;
+  }
+}
+@media (max-width: 600px) {
+  .battle-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+  }
+  .battle-grid > * {
+    width: 100%;
+  }
+  .battle-grid.pilot .first-tank {
+    order: 0;
+  }
+  .battle-grid.pilot .aim-panel {
+    order: 1;
+  }
+  .battle-grid.pilot .drive-panel {
+    order: 2;
+  }
+  .battle-grid.pilot .second-tank {
+    order: 3;
+  }
+  .battle-grid.pilot .feed {
+    order: 4;
+  }
+}
 * {
   box-sizing: border-box;
 }
@@ -411,21 +514,6 @@ main {
   font-size: 35px;
   line-height: 29px;
   color: #a4af9d;
-}
-.pilot-grid {
-  display: grid;
-  grid-template-columns: minmax(235px, 1fr) minmax(340px, 1.5fr) minmax(
-      235px,
-      1fr
-    );
-  gap: 20px;
-  align-items: start;
-}
-.left-column,
-.right-column {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
 }
 .panel,
 .tank-card {
@@ -1024,15 +1112,6 @@ main {
   font-size: 8px;
   color: #6d7b61;
 }
-.spectator-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 40px;
-  position: relative;
-}
-.spectator-grid .tank-card {
-  padding: 25px 32px 0;
-}
 .large .tank-title {
   margin: 22px 0;
 }
@@ -1055,29 +1134,6 @@ main {
 }
 .large .life {
   font-size: 11px;
-}
-.versus {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  background: #101411;
-  width: 56px;
-  height: 56px;
-  border: 1px solid #394531;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  font:
-    italic 16px Consolas,
-    monospace;
-  color: #a1b38d;
-}
-.spectator-bottom {
-  display: grid;
-  grid-template-columns: 1.35fr 1fr;
-  gap: 20px;
-  margin-top: 22px;
 }
 .match-management {
   padding: 20px 25px;
@@ -1343,13 +1399,6 @@ footer > span:nth-child(2) {
   .header-tools {
     gap: 8px;
   }
-  .pilot-grid {
-    grid-template-columns: minmax(210px, 1fr) minmax(300px, 1.4fr) minmax(
-        210px,
-        1fr
-      );
-    gap: 13px;
-  }
   .tank-card {
     padding: 18px 16px 0;
   }
@@ -1419,18 +1468,6 @@ footer > span:nth-child(2) {
   .header-tools {
     gap: 3px;
   }
-  .pilot-grid {
-    grid-template-columns: 1fr 1.25fr;
-  }
-  .right-column {
-    grid-column: 1/-1;
-    display: grid;
-    grid-template-columns: 1fr 1.25fr;
-    gap: 13px;
-  }
-  .right-column .tank-card {
-    padding-bottom: 0;
-  }
   .feed-list {
     min-height: 130px;
   }
@@ -1453,15 +1490,6 @@ footer > span:nth-child(2) {
   }
   .environment-note b {
     margin-right: 8px;
-  }
-  .spectator-grid {
-    gap: 25px;
-  }
-  .spectator-grid .tank-card {
-    padding: 20px 22px 0;
-  }
-  .spectator-bottom {
-    grid-template-columns: 1fr 1fr;
   }
   .management-buttons .text-button {
     margin-left: 0;
@@ -1584,15 +1612,6 @@ footer > span:nth-child(2) {
   .score-line b {
     font-size: 28px;
   }
-  .pilot-grid {
-    display: flex;
-    flex-direction: column;
-    gap: 15px;
-  }
-  .left-column,
-  .right-column {
-    display: contents;
-  }
   .tank-card {
     width: 100%;
     padding: 18px 21px 0;
@@ -1616,9 +1635,6 @@ footer > span:nth-child(2) {
     width: 100%;
     padding: 20px 21px 0;
   }
-  .left-column > .tank-card {
-    order: 0;
-  }
   .drive-panel {
     order: 2;
     width: 100%;
@@ -1635,32 +1651,11 @@ footer > span:nth-child(2) {
     font-size: 10px;
     min-width: 80px;
   }
-  .right-column > .tank-card {
-    order: 3;
-  }
-  .right-column > .feed {
-    order: 4;
-    width: 100%;
-    padding: 20px;
-  }
   .aim-area {
     height: 275px;
   }
   .drive-panel .hint {
     text-align: center;
-  }
-  .spectator-grid {
-    display: flex;
-    flex-direction: column;
-    gap: 17px;
-  }
-  .versus {
-    display: none;
-  }
-  .spectator-bottom {
-    display: flex;
-    flex-direction: column;
-    gap: 17px;
   }
   .large .tank-title h2 {
     font-size: 24px;

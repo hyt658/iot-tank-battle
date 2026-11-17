@@ -1,14 +1,4 @@
-import type {
-  BattleEvent,
-  ClientMessage,
-  ConnectionSettings,
-  ServerMessage,
-  StateMessage,
-  TankId,
-  TankState,
-} from "./protocol";
-
-const newTank = (id: TankId): TankState => ({
+const newTank = (id) => ({
   id,
   player: id === 1 ? "Player 01" : "Sparring bot",
   online: true,
@@ -19,37 +9,32 @@ const newTank = (id: TankId): TankState => ({
   deaths: 0,
   respawn_ms: 0,
 });
-
 /** Local UI simulator only: a permitted shot is a simulated hit, with no IR/physics validation. */
 export class MockArena {
-  state: StateMessage = {
+  state = {
     type: "state",
     status: "lobby",
     time_left_ms: 0,
     winner: null,
     tanks: [newTank(1), newTank(2)],
   };
-  private deadline = 0;
-  private lastFire = [-Infinity, -Infinity];
-  private respawnAt = [0, 0];
-  private protectedUntil = [0, 0];
-  private nextAmmo = 0;
-  private lastBot = 0;
-  private events: ServerMessage[] = [];
+  deadline = 0;
+  lastFire = [-Infinity, -Infinity];
+  respawnAt = [0, 0];
+  protectedUntil = [0, 0];
+  nextAmmo = 0;
+  lastBot = 0;
+  events = [];
   botEnabled = true;
-  snapshot(): StateMessage {
+  snapshot() {
     return structuredClone(this.state);
   }
-  drain(): ServerMessage[] {
+  drain() {
     const events = this.events;
     this.events = [];
     return events;
   }
-  command(
-    message: ClientMessage,
-    settings: ConnectionSettings,
-    now: number,
-  ): void {
+  command(message, settings, now) {
     if (message.type === "hello" && settings.role === "player") {
       this.state.tanks[settings.tankId - 1].player = message.name || "Player";
     }
@@ -77,7 +62,7 @@ export class MockArena {
       this.state.time_left_ms = 3000;
     }
   }
-  reset(): void {
+  reset() {
     this.state = {
       type: "state",
       status: "lobby",
@@ -94,10 +79,10 @@ export class MockArena {
     this.protectedUntil = [0, 0];
     this.events = [];
   }
-  private error(message: string): void {
+  error(message) {
     this.events.push({ type: "error", message });
   }
-  fire(shooter: TankId, now: number, quiet = false): void {
+  fire(shooter, now, quiet = false) {
     const source = this.state.tanks[shooter - 1];
     if (
       !["lobby", "running"].includes(this.state.status) ||
@@ -156,17 +141,17 @@ export class MockArena {
       kind: "kill",
       shooter,
       target: target.id,
-    } satisfies BattleEvent);
+    });
     if (source.kills >= 5) this.end();
   }
-  private end(): void {
+  end() {
     this.state.status = "ended";
     this.state.time_left_ms = 0;
     const [a, b] = this.state.tanks;
     this.state.winner =
       a.kills === b.kills ? null : a.kills > b.kills ? a.id : b.id;
   }
-  tick(now: number, human: TankId = 1): void {
+  tick(now, human = 1) {
     if (this.state.status === "countdown") {
       this.state.time_left_ms = Math.max(0, this.deadline - now);
       if (now >= this.deadline) {
