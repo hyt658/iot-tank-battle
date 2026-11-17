@@ -1,0 +1,1 @@
+"""IoT Tank Battle server."""

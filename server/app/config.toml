@@ -1,0 +1,11 @@
+[network]
+ssid = "iot-tank-arena"
+arena_host = "192.168.2.1"
+bind_host = "0.0.0.0"
+port = 8000
+
+[runtime]
+tick_interval_ms = 25
+outbound_queue_size = 64
+send_timeout_seconds = 1.0
+log_level = "INFO"
