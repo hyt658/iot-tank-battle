@@ -140,9 +140,9 @@ def decode_message(text: str) -> dict[str, Any]:
     try:
         payload = json.loads(text, parse_constant=_reject_constant)
     except (ValueError, RecursionError) as exc:
-        raise ProtocolError("消息必须是合法的 JSON 文本") from exc
+        raise ProtocolError("Message must be valid JSON text.") from exc
     if not isinstance(payload, dict) or not isinstance(payload.get("type"), str):
-        raise ProtocolError("消息必须是包含字符串 type 字段的 JSON 对象")
+        raise ProtocolError("Message must be a JSON object with a string type field.")
     return payload
 
 
@@ -151,17 +151,22 @@ def parse_message(role: Role, text: str, *, registered: bool) -> Message:
     kind = payload["type"]
     if not registered:
         if kind != "hello":
-            raise ProtocolError("连接后的第一条消息必须是 hello", message_type=kind)
+            raise ProtocolError(
+                "The first message after connecting must be hello.", message_type=kind
+            )
         model = HELLO_MODELS[role]
     else:
         model = INBOUND_MODELS[role].get(kind)
         if model is None:
-            raise ProtocolError(f"{role.value} 连接不允许发送 {kind} 消息", message_type=kind)
+            raise ProtocolError(
+                f"Messages of type {kind!a} are not allowed on {role.value} connections.",
+                message_type=kind,
+            )
     try:
         return model.model_validate(payload)
     except ValidationError as exc:
         location = ".".join(str(part) for part in exc.errors()[0]["loc"])
-        raise ProtocolError(f"消息字段不符合协议：{location}", message_type=kind) from exc
+        raise ProtocolError(f"Invalid message field: {location!a}.", message_type=kind) from exc
 
 
 def as_payload(message: Message) -> dict[str, Any]:

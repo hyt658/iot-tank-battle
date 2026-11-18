@@ -139,6 +139,8 @@ python3 -m venv .venv
 
 ## 本地开发验证
 
+代码、注释、异常、日志、控制台输出及协议消息的内置文案统一使用英文；README 和报告保持中文。
+
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 .\.venv\Scripts\python.exe -m ruff check app

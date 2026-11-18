@@ -104,7 +104,7 @@ class Arena:
                     return
                 try:
                     if incoming.get("text") is None:
-                        raise ProtocolError("协议只接受 JSON 文本消息")
+                        raise ProtocolError("Only JSON text messages are accepted.")
                     message = parse_message(
                         connection.role, incoming["text"], registered=connection.registered
                     )
@@ -128,7 +128,7 @@ class Arena:
     def _register(self, connection: Connection, message: Message) -> None:
         if isinstance(message, PlayerHello):
             if message.tank_id in self.players:
-                raise OperationError("这台坦克已经有人控制")
+                raise OperationError("This tank is already controlled by another player.")
             connection.tank_id = message.tank_id
             self.players[message.tank_id] = connection
             self.game.tanks[message.tank_id].player = message.name
@@ -142,7 +142,7 @@ class Arena:
             self.tanks[message.tank_id] = connection
             self.game.tanks[message.tank_id].online = True
         elif not isinstance(message, SpectatorHello):
-            raise ProtocolError("连接后的第一条消息必须是 hello")
+            raise ProtocolError("The first message after connecting must be hello.")
         connection.registered = True
         if connection.role == Role.TANK:
             self._sync_tank_states()
@@ -154,7 +154,7 @@ class Arena:
     def _dispatch(self, connection: Connection, message: Message) -> None:
         if isinstance(message, Pong):
             if message.ts not in connection.pending_pings:
-                raise ProtocolError("pong 的 ts 必须原样返回服务器发送的值")
+                raise ProtocolError("pong must echo the original server ts value.")
             connection.pending_pings.remove(message.ts)
         elif isinstance(message, GameCommand):
             if message.action == "start":
@@ -176,7 +176,7 @@ class Arena:
         elif isinstance(message, Fire):
             tank = self._available_tank(connection.tank_id)
             if tank is None:
-                raise OperationError("坦克不在线")
+                raise OperationError("Tank is offline.")
             record = self.game.reserve_fire(connection.tank_id)
             self._fire_owners[record.shooter] = connection
             tank.send(
@@ -288,7 +288,7 @@ class Arena:
         for tank_id in update.failed_fires:
             connection = self._fire_owners.pop(tank_id, None)
             if connection is not None and self.players.get(tank_id) is connection:
-                connection.send(Error(message="开火指令发送失败或已过期，请重试"))
+                connection.send(Error(message="Fire command failed or expired. Please try again."))
         if update.changed:
             self._broadcast_web_state()
 
@@ -300,7 +300,7 @@ class Arena:
                     self._detach(connection)
                     continue
                 if now - connection.last_received_ms >= CONNECTION_TIMEOUT_MS:
-                    error = None if connection.registered else "3 秒内未收到 hello"
+                    error = None if connection.registered else "No hello received within 3 seconds."
                     connection.request_close(1001, "Receive timeout", error=error)
                     self._detach(connection)
                 elif now >= connection.next_ping_ms:

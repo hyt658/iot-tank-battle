@@ -116,9 +116,9 @@ class GameEngine:
 
     def start(self) -> GameUpdate:
         if self.phase != Phase.LOBBY:
-            raise OperationError("只能在 lobby 阶段开始比赛")
+            raise OperationError("A match can only be started from the lobby.")
         if any(not tank.online or tank.player is None for tank in self.tanks.values()):
-            raise OperationError("两台坦克必须都在线且都有玩家")
+            raise OperationError("Both tanks must be online and have a player.")
         self._fresh_round()
         self.phase = Phase.COUNTDOWN
         self.deadline_ms = self.clock() + COUNTDOWN_MS
@@ -139,15 +139,15 @@ class GameEngine:
         tank = self.tanks[shooter]
         now = self.clock()
         if not tank.online or not self.enabled(shooter):
-            raise OperationError("坦克离线或当前无法开火")
+            raise OperationError("Tank is offline or cannot fire in its current state.")
         if shooter in self.pending_fires:
-            raise OperationError("上一条开火指令仍在发送中")
+            raise OperationError("The previous fire command is still being sent.")
         previous = self.last_fire_ms[shooter]
         if previous is not None and now - previous < FIRE_COOLDOWN_MS:
-            raise OperationError("开火冷却中")
+            raise OperationError("Weapon is cooling down.")
         charged = self.phase == Phase.RUNNING
         if charged and tank.ammo <= 0:
-            raise OperationError("没有弹药")
+            raise OperationError("Out of ammunition.")
         shot_id = self.next_shot[shooter]
         record = Shot(shooter, shot_id, now, self.round_id, tank.life_id, charged)
         self.next_shot[shooter] = (shot_id + 1) % SHOT_COUNT
