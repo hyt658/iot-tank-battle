@@ -5,7 +5,7 @@
 namespace hw::infrared {
 
 /**
- * @brief Start receiving IR shots in the background.
+ * @brief Get ready to send IR shots, and start receiving them in the background.
  */
 void start(void (*hit_handler)(uint8_t shooter, uint8_t shot));
 
