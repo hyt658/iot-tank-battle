@@ -42,7 +42,7 @@ export class MockArena {
       this.fire(settings.tankId, now);
     if (message.type === "game") {
       if (settings.role !== "spectator") {
-        this.error("请在观战计分页管理比赛");
+        this.error("Use the Scoreboard to manage the match.");
         return;
       }
       if (message.action === "reset") {
@@ -53,7 +53,7 @@ export class MockArena {
         this.state.status !== "lobby" ||
         this.state.tanks.some((t) => !t.online || !t.player)
       ) {
-        this.error("需要在准备阶段，且两台坦克和玩家都已就绪");
+        this.error("Start from the lobby with both tanks and players ready.");
         return;
       }
       this.reset();
@@ -89,15 +89,15 @@ export class MockArena {
       !source.online ||
       !source.alive
     ) {
-      if (!quiet) this.error("坦克当前无法开火");
+      if (!quiet) this.error("This tank cannot fire right now.");
       return;
     }
     if (now - this.lastFire[shooter - 1] < 1000) {
-      if (!quiet) this.error("开火冷却中");
+      if (!quiet) this.error("Fire cooldown is active.");
       return;
     }
     if (this.state.status === "running" && source.ammo <= 0) {
-      if (!quiet) this.error("没有弹药");
+      if (!quiet) this.error("Out of ammo.");
       return;
     }
     this.lastFire[shooter - 1] = now;

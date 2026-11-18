@@ -12,7 +12,7 @@
   color-scheme: dark;
 }
 
-/* 两个页面共用一组坦克状态和动态列表。 */
+/* Both views share the tank status cards and event feed. */
 .battle-grid {
   display: grid;
   gap: 20px;

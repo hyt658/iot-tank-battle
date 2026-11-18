@@ -16,7 +16,7 @@ import {
   socketUrl,
 } from "./connection.js";
 
-// 页面与设置
+// Page and settings
 const settings = ref({
   demo: true,
   server: "ws://10.42.0.1:8000",
@@ -39,22 +39,22 @@ const dialog = ref(null);
 const draft = ref({});
 const formError = ref("");
 const phases = {
-  lobby: "自由练习",
-  countdown: "准备交战",
-  running: "比赛进行中",
-  ended: "比赛结束",
+  lobby: "Free practice",
+  countdown: "Get ready",
+  running: "Match in progress",
+  ended: "Match ended",
 };
 const statuses = {
-  connected: "已连接",
-  connecting: "连接中",
-  reconnecting: "正在重连",
-  disconnected: "未连接",
+  connected: "Connected",
+  connecting: "Connecting",
+  reconnecting: "Reconnecting",
+  disconnected: "Disconnected",
 };
 const directions = [
-  { key: "KeyW", label: "W", action: "前进", arrow: "↑" },
-  { key: "KeyA", label: "A", action: "左转", arrow: "←" },
-  { key: "KeyS", label: "S", action: "后退", arrow: "↓" },
-  { key: "KeyD", label: "D", action: "右转", arrow: "→" },
+  { key: "KeyW", label: "W", action: "Forward", arrow: "↑" },
+  { key: "KeyA", label: "A", action: "Turn left", arrow: "←" },
+  { key: "KeyS", label: "S", action: "Reverse", arrow: "↓" },
+  { key: "KeyD", label: "D", action: "Turn right", arrow: "→" },
 ];
 
 const connected = computed(() => status.value === "connected");
@@ -103,12 +103,12 @@ function formatTime(ms) {
   return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 }
 function tankStatus(tank) {
-  if (!tank.online) return "连接中断";
-  if (locked.value) return "控制已锁定";
-  return tank.alive ? "可以行动" : `复活 ${Math.ceil(tank.respawn_ms / 1000)}s`;
+  if (!tank.online) return "Connection lost";
+  if (locked.value) return "Controls locked";
+  return tank.alive ? "Ready" : `Respawn in ${Math.ceil(tank.respawn_ms / 1000)}s`;
 }
 
-// 连接：模拟模式与真实服务器使用同一套消息。
+// Demo and server connections use the same messages.
 let connection = null;
 let session = 0;
 let eventId = 0;
@@ -134,7 +134,7 @@ function connect(next = settings.value) {
       message(message) {
         if (session !== activeSession) return;
         if (message.type === "state") {
-          // 只在进入比赛时回正，后续刷新和复活不覆盖瞄准角度。
+          // Recenter only when entering a match, not on updates or respawn.
           if (message.status === "running" && state.value?.status !== "running")
             angle.value = 0;
           state.value = message;
@@ -148,7 +148,7 @@ function connect(next = settings.value) {
       },
     });
   } catch (exception) {
-    error.value = exception.message || "连接失败";
+    error.value = exception.message || "Connection failed";
     status.value = "disconnected";
   }
 }
@@ -161,7 +161,7 @@ watch(bot, (value) => {
   demoArena.botEnabled = value;
 });
 
-// 驾驶：固定 20 Hz 发送；松键、失焦、断线或锁定立即停车。
+// Send drive commands at 20 Hz; stop on release, blur, disconnect or lock.
 const keys = new Set();
 const movementKeys = new Set([
   "KeyW",
@@ -277,7 +277,7 @@ function togglePause() {
   paused.value = !paused.value;
 }
 
-// 设置、帮助与重置确认共用一个弹窗。
+// Settings, help and reset confirmation share one dialog.
 async function openDialog(kind) {
   stop();
   draft.value = { ...settings.value };
@@ -297,7 +297,7 @@ function applySettings() {
     paused.value = false;
     closeDialog();
   } catch {
-    formError.value = "请输入有效地址，例如 ws://10.42.0.1:8000";
+    formError.value = "Enter a valid address, such as ws://10.42.0.1:8000.";
   }
 }
 function resetMatch() {
@@ -309,7 +309,7 @@ async function fullScreen() {
     if (document.fullscreenElement) await document.exitFullscreen();
     else await document.documentElement.requestFullscreen();
   } catch {
-    error.value = "当前浏览器不支持全屏，可使用浏览器的全屏功能";
+    error.value = "Full screen is unavailable. Try the full-screen option in your browser menu.";
   }
 }
 
@@ -348,19 +348,19 @@ onUnmounted(() => {
 <template>
   <div class="app-shell">
     <header class="topbar">
-      <a href="#" class="brand" aria-label="Tank Arena 首页"
+      <a href="#" class="brand" aria-label="Tank Arena home"
         ><span class="brand-mark">⊕</span
         ><span
           >TANK<span class="brand-light">ARENA</span
           ><small>LOCAL MULTIPLAYER COMBAT</small></span
         ></a
       >
-      <nav aria-label="主导航">
+      <nav aria-label="Main navigation">
         <button :class="{ selected: player }" @click="swapRole('player')">
-          驾驶控制
+          Pilot
         </button>
         <button :class="{ selected: !player }" @click="swapRole('spectator')">
-          观战计分
+          Scoreboard
         </button>
       </nav>
       <div class="header-tools">
@@ -373,20 +373,20 @@ onUnmounted(() => {
           href="#spectator"
           target="_blank"
           rel="noopener noreferrer"
-          aria-label="新标签页打开计分板"
-          title="新标签页打开计分板，保留当前玩家连接"
+          aria-label="Open scoreboard in a new tab"
+          title="Open the scoreboard in a new tab and keep this player connected"
           >↗</a
         >
         <button
           class="icon-button"
-          aria-label="操作帮助"
+          aria-label="Controls and help"
           @click="openDialog('help')"
         >
           ?
         </button>
         <button
           class="icon-button"
-          aria-label="连接设置"
+          aria-label="Connection settings"
           @click="openDialog('settings')"
         >
           ⚙
@@ -400,54 +400,54 @@ onUnmounted(() => {
             <span></span> COMMAND CENTER
             <span class="muted">/ {{ player ? "PILOT" : "SPECTATOR" }}</span>
           </div>
-          <h1>{{ player ? "准备好，进入战场。" : "每一发，都改变战局。" }}</h1>
+          <h1>{{ player ? "Ready for battle." : "Every shot counts." }}</h1>
           <p>
             {{
               player
-                ? "掌控履带，转动炮塔。下一次命中，由你决定。"
-                : "实时关注双方战况，掌握比赛的每一个转折。"
+                ? "Take the controls. Aim your turret. Make your next shot count."
+                : "Follow both tanks and every turn of the match in real time."
             }}
           </p>
         </div>
         <button class="secondary small" @click="openDialog('settings')">
           <span class="mode-dot"></span
-          >{{ settings.demo ? "模拟演练" : "实机连接" }} ›
+          >{{ settings.demo ? "Demo" : "Live connection" }} ›
         </button>
       </div>
       <div class="environment-note" :class="{ 'live-note': !settings.demo }">
         <span
-          ><b>{{ settings.demo ? "模拟模式" : "真实服务器" }}</b
+          ><b>{{ settings.demo ? "Demo mode" : "Live server" }}</b
           >{{
             settings.demo
-              ? "本页使用假数据，不会控制实体坦克。切换到观战页可以开始比赛。"
-              : `${settings.server} · 所有比赛数据由服务器提供`
+              ? "Simulated data only. Open the Scoreboard to start a match."
+              : `${settings.server} · All match data comes from the server`
           }}</span
         >
         <label v-if="settings.demo" class="bot-toggle"
-          ><input v-model="bot" type="checkbox" />自动对手</label
+          ><input v-model="bot" type="checkbox" />Auto opponent</label
         >
       </div>
       <div v-if="error" class="error-banner" role="alert">
         <span>{{ error }}</span
-        ><button aria-label="关闭提示" @click="error = ''">×</button>
+        ><button aria-label="Dismiss message" @click="error = ''">×</button>
       </div>
       <div v-if="!connected" class="error-banner" role="status">
         <span>{{
           status === "reconnecting"
-            ? "连接中断，驾驶已停止；每秒尝试重连。"
-            : "等待连接和服务器状态，驾驶暂不可用。"
+            ? "Connection lost. Driving stopped. Retrying every second."
+            : "Waiting for the connection and match data. Driving is unavailable."
         }}</span
-        ><button @click="connect()">重新连接</button>
+        ><button @click="connect()">Reconnect</button>
       </div>
 
-      <section class="match-strip" aria-label="比赛状态">
+      <section class="match-strip" aria-label="Match status">
         <div class="match-phase">
           <span class="live-dot"></span>
           <div>
             <span class="eyebrow">{{
               stage === "lobby" ? "PRACTICE SESSION" : "MATCH / 01"
             }}</span
-            ><strong>{{ state ? phases[stage] : "等待比赛数据" }}</strong>
+            ><strong>{{ state ? phases[stage] : "Waiting for match data" }}</strong>
           </div>
         </div>
         <div class="score-line">
@@ -467,8 +467,8 @@ onUnmounted(() => {
           }}</strong
           ><span>{{
             stage === "lobby"
-              ? "自由练习 · 不消耗弹药"
-              : "先达 5 杀 / 限时 3 分钟"
+              ? "Practice · Unlimited ammo"
+              : "First to 5 kills / 3 min"
           }}</span>
         </div>
       </section>
@@ -476,15 +476,15 @@ onUnmounted(() => {
         <div>
           <strong>{{
             state.winner
-              ? `TANK 0${state.winner} 赢得比赛`
-              : "势均力敌，本局平局"
+              ? `TANK 0${state.winner} wins the match`
+              : "The match is a draw"
           }}</strong>
-          <p>比赛已结束，坦克控制已锁定。请在观战页重置下一局。</p>
+          <p>Match over. Controls are locked. Reset the match from the Scoreboard.</p>
         </div>
       </div>
       <div v-if="stage === 'countdown'" class="countdown-banner" role="status">
-        准备交战 <b>{{ Math.ceil(state.time_left_ms / 1000) }}</b><span
-          >倒计时期间控制已锁定</span
+        Get ready <b>{{ Math.ceil(state.time_left_ms / 1000) }}</b><span
+          >Controls locked during countdown</span
         >
       </div>
 
@@ -502,18 +502,18 @@ onUnmounted(() => {
           <div class="card-overline">
             <span>TANK / 0{{ tank.id }}</span
             ><span class="tiny-status" :class="{ online: tank.online }"
-              ><i></i>{{ tank.online ? "在线" : "离线" }}</span
+              ><i></i>{{ tank.online ? "Online" : "Offline" }}</span
             >
           </div>
           <div class="tank-title">
             <div>
-              <h2>{{ tank.player || "等待玩家" }}</h2>
+              <h2>{{ tank.player || "Waiting for player" }}</h2>
               <span>{{
                 !player
-                  ? "参赛玩家"
+                  ? "Player"
                   : tank.id === settings.tankId
-                    ? "你的坦克"
-                    : "对手坦克"
+                    ? "Your tank"
+                    : "Opponent"
               }}</span>
             </div>
             <div class="tank-glyph" aria-hidden="true">
@@ -522,10 +522,10 @@ onUnmounted(() => {
             </div>
           </div>
           <div class="stat-label">
-            <span>装甲血量</span
+            <span>Health</span
             ><strong>{{ tank.hp }}<small> / 5</small></strong>
           </div>
-          <div class="meter hp" :aria-label="`血量 ${tank.hp}/5`">
+          <div class="meter hp" :aria-label="`Health ${tank.hp}/5`">
             <span
               v-for="n in 5"
               :key="n"
@@ -533,10 +533,10 @@ onUnmounted(() => {
             ></span>
           </div>
           <div class="stat-label">
-            <span>剩余弹药</span
+            <span>Ammo</span
             ><strong>{{ tank.ammo }}<small> / 10</small></strong>
           </div>
-          <div class="meter ammo" :aria-label="`弹药 ${tank.ammo}/10`">
+          <div class="meter ammo" :aria-label="`Ammo ${tank.ammo}/10`">
             <span
               v-for="n in 10"
               :key="n"
@@ -545,11 +545,11 @@ onUnmounted(() => {
           </div>
           <div class="kd">
             <div>
-              <span>击杀</span
+              <span>Kills</span
               ><strong>{{ String(tank.kills).padStart(2, "0") }}</strong>
             </div>
             <div>
-              <span>死亡</span
+              <span>Deaths</span
               ><strong>{{ String(tank.deaths).padStart(2, "0") }}</strong>
             </div>
             <span class="life" :class="{ dead: !tank.alive }">{{
@@ -557,11 +557,11 @@ onUnmounted(() => {
             }}</span>
           </div>
         </section>
-        <div v-if="!state" class="panel loading first-tank">等待坦克数据…</div>
+        <div v-if="!state" class="panel loading first-tank">Waiting for tank data…</div>
 
         <section v-if="player" class="aim-panel panel">
           <div class="section-label">
-            <span>⊕ 炮塔瞄准</span><span class="mono">TURRET CONTROL</span>
+            <span>⊕ Aim</span><span class="mono">TURRET CONTROL</span>
           </div>
           <div class="aim-area" @pointermove="aim" @click="fire">
             <div class="aim-grid"></div>
@@ -586,52 +586,52 @@ onUnmounted(() => {
               <span class="status-square" :class="{ off: !enabled }"></span
               >{{
                 !connected
-                  ? "等待连接"
+                  ? "Waiting for connection"
                   : locked
-                    ? "控制已锁定"
+                    ? "Controls locked"
                     : paused
-                      ? "控制已暂停"
+                      ? "Controls paused"
                       : !own?.alive
-                        ? `复活中 · ${Math.ceil((own?.respawn_ms ?? 0) / 1000)}s`
+                        ? `Respawning · ${Math.ceil((own?.respawn_ms ?? 0) / 1000)}s`
                         : enabled
-                          ? "瞄准系统就绪"
-                          : "控制已锁定"
+                          ? "Ready to aim"
+                          : "Controls locked"
               }}
             </div>
             <div v-if="now - lastShot < 220" class="shot-flash"></div>
           </div>
           <div class="angle-control">
             <div>
-              <span>炮塔角度</span
+              <span>Turret angle</span
               ><strong>{{ angle > 0 ? "+" : "" }}{{ angle }}°</strong>
             </div>
             <input
               v-model.number="angle"
-              aria-label="炮塔角度"
+              aria-label="Turret angle"
               type="range"
               min="-90"
               max="90"
               :disabled="!enabled"
-            /><span>左</span><span>右</span>
+            /><span>Left</span><span>Right</span>
           </div>
           <button class="fire-button" :disabled="!fireReady" @click="fire">
             <span>⊕</span
             ><span
-              >{{ cooldown ? `装填中 ${(cooldown / 1000).toFixed(1)}s` : "开火"
+              >{{ cooldown ? `Reloading ${(cooldown / 1000).toFixed(1)}s` : "Fire"
               }}<small>{{
-                own?.alive ? "FIRE CANNON" : "等待复活"
+                own?.alive ? "FIRE CANNON" : "Awaiting respawn"
               }}</small></span
             ><kbd>SPACE</kbd>
           </button>
-          <p class="hint aim-hint">移动鼠标瞄准 · 点击瞄准区或按空格开火</p>
+          <p class="hint aim-hint">Move the mouse to aim · Click here or press Space to fire</p>
           <div class="aim-footnote">
-            这是炮塔角度示意，不是摄像头画面或坦克定位。
+            Turret angle display only; no camera feed or tank tracking.
           </div>
         </section>
 
         <section v-if="player" class="drive-panel panel">
           <div class="section-label">
-            <span>履带控制</span><span class="mono">W A S D</span>
+            <span>Drive</span><span class="mono">W A S D</span>
           </div>
           <div class="drive-layout">
             <div class="d-pad">
@@ -659,22 +659,22 @@ onUnmounted(() => {
               >
             </div>
           </div>
-          <p class="hint">按住方向键驾驶，松开即停止</p>
+          <p class="hint">Hold WASD or arrow keys to drive. Release to stop.</p>
           <button
             class="stop-button"
             :class="{ resume: paused }"
             :disabled="!connected"
             @click="togglePause"
           >
-            {{ paused ? "▶ 恢复控制" : "Ⅱ 暂停驾驶 / 停车" }}
+            {{ paused ? "▶ Resume" : "Ⅱ Pause / Stop" }}
           </button>
         </section>
         <section v-else class="match-management panel">
           <div class="section-label">
-            <span>比赛管理</span
+            <span>Match controls</span
             ><button
               class="icon-button"
-              aria-label="全屏观战"
+              aria-label="Full-screen scoreboard"
               @click="fullScreen"
             >
               ⛶
@@ -683,55 +683,55 @@ onUnmounted(() => {
           <h2>
             {{
               stage === "lobby"
-                ? "双方就绪，即刻开战。"
+                ? "Both sides ready. Start the match."
                 : stage === "running"
-                  ? "交火进行中。"
+                  ? "Battle in progress."
                   : stage === "ended"
-                    ? "准备下一场对决。"
-                    : "战斗即将开始。"
+                    ? "Ready for the next round."
+                    : "The battle starts soon."
             }}
           </h2>
-          <p>3 秒准备 · 5 点血量 · 5 秒复活 · 先到 5 杀获胜</p>
+          <p>3 s countdown · 5 HP · 5 s respawn · First to 5 kills wins</p>
           <div class="management-buttons">
             <button
               class="primary"
               :disabled="!startReady"
               @click="send({ type: 'game', action: 'start' })"
             >
-              ▶ 开始比赛</button
+              ▶ Start match</button
             ><button
               class="secondary"
               :disabled="!connected"
               @click="openDialog('reset')"
             >
-              ↻ 重置比赛</button
+              ↻ Reset match</button
             ><button
               v-if="settings.demo"
               class="text-button"
               @click="swapRole('player')"
             >
-              返回驾驶 ›
+              Back to pilot ›
             </button>
           </div>
           <p v-if="stage === 'lobby' && !startReady" class="hint">
-            需要两台坦克在线，且各有一名玩家。
+            Both tanks must be online, with one player each.
           </p>
         </section>
 
         <section class="feed panel">
           <div class="section-label">
-            <span>战场动态</span><span class="mono">LIVE FEED</span>
+            <span>Battle log</span><span class="mono">LIVE FEED</span>
           </div>
           <div
             class="feed-list"
             role="log"
-            aria-label="战场动态"
+            aria-label="Battle log"
             aria-live="polite"
             aria-relevant="additions"
           >
             <div v-if="!feed.length" class="feed-empty">
-              <span>等待第一发炮火</span
-              ><small>命中与击杀记录将在这里显示</small>
+              <span>Waiting for the first shot</span
+              ><small>Hits and kills will appear here</small>
             </div>
             <div
               v-for="item in feed.slice(0, 6)"
@@ -743,20 +743,20 @@ onUnmounted(() => {
                 ><b :class="`text-team-${item.shooter}`"
                   >TANK 0{{ item.shooter }}</b
                 >
-                {{ item.kind === "kill" ? "击毁" : "命中" }}
+                {{ item.kind === "kill" ? "destroyed" : "hit" }}
                 <b :class="`text-team-${item.target}`"
                   >0{{ item.target }}</b
                 ></span
               ><time>{{
-                new Date(item.at).toLocaleTimeString("zh-CN", { hour12: false })
+                new Date(item.at).toLocaleTimeString("en", { hour12: false })
               }}</time>
             </div>
           </div>
         </section>
       </div>
       <footer>
-        <span>切出窗口自动停车</span
-        ><span>20 Hz 控制 · 1 s 开火间隔 · 3 s 弹药恢复</span
+        <span>Auto-stop when the window loses focus</span
+        ><span>20 Hz control · 1 s fire cooldown · 3 s ammo regen</span
         ><span class="footer-brand">TANK ARENA / 01</span>
       </footer>
     </main>
@@ -766,10 +766,10 @@ onUnmounted(() => {
       class="dialog"
       :aria-label="
         modal === 'settings'
-          ? '连接你的战场'
+          ? 'Connection settings'
           : modal === 'reset'
-            ? '重置这场比赛？'
-            : '驾驶员操作指南'
+            ? 'Reset this match?'
+            : 'Pilot guide'
       "
       @cancel.prevent="closeDialog"
     >
@@ -777,13 +777,13 @@ onUnmounted(() => {
         <h2>
           {{
             modal === "settings"
-              ? "连接你的战场"
+              ? "Connection settings"
               : modal === "reset"
-                ? "重置这场比赛？"
-                : "驾驶员操作指南"
+                ? "Reset this match?"
+                : "Pilot guide"
           }}
         </h2>
-        <button class="icon-button" aria-label="关闭弹窗" @click="closeDialog">
+        <button class="icon-button" aria-label="Close dialog" @click="closeDialog">
           ×
         </button>
       </div>
@@ -794,38 +794,38 @@ onUnmounted(() => {
             :class="{ active: draft.demo }"
             @click="draft.demo = true"
           >
-            <b>模拟演练</b><small>无需硬件，直接体验</small></button
+            <b>Demo</b><small>Try it without hardware</small></button
           ><button
             type="button"
             :class="{ active: !draft.demo }"
             @click="draft.demo = false"
           >
-            <b>真实服务器</b><small>连接本地 Wi-Fi 战场</small>
+            <b>Live server</b><small>Connect over local Wi-Fi</small>
           </button>
         </div>
         <label v-if="!draft.demo" class="field"
-          >服务器地址<input
+          >Server address<input
             v-model="draft.server"
             placeholder="ws://10.42.0.1:8000"
             required
           /><small
-            >先连接 tank-arena Wi-Fi；网页会自动选择连接路径。</small
+            >Connect to tank-arena Wi-Fi first. The connection path is selected automatically.</small
           ></label
         >
         <label class="field"
-          >进入方式<select v-model="draft.role">
-            <option value="player">玩家 · 驾驶坦克</option>
-            <option value="spectator">观众 · 计分与比赛管理</option>
+          >Join as<select v-model="draft.role">
+            <option value="player">Player · Drive a tank</option>
+            <option value="spectator">Spectator · Scores and match controls</option>
           </select></label
         >
         <div v-if="draft.role === 'player'" class="form-row">
           <label class="field"
-            >玩家名字<input
+            >Player name<input
               v-model="draft.name"
               maxlength="24"
               required /></label
           ><label class="field"
-            >坦克编号<select v-model.number="draft.tankId">
+            >Tank<select v-model.number="draft.tankId">
               <option :value="1">TANK 01</option>
               <option :value="2">TANK 02</option>
             </select></label
@@ -835,43 +835,42 @@ onUnmounted(() => {
         <p class="dialog-note">
           {{
             draft.demo
-              ? "演练数据只存在当前标签页，刷新后重新开始。后端就绪后，在这里切换连接即可。"
-              : "真实模式不使用假数据补位。切换成观众会释放玩家连接；实战请另开计分页，并选择真实服务器。"
+              ? "Each tab has its own demo match. Refresh to start over. Switch to Live server here when the backend is ready."
+              : "Live mode requires server data. Switching to Spectator disconnects your player. To keep driving, open the Scoreboard in a new tab and select Live server there."
           }}
         </p>
         <button class="primary full" type="submit">
-          {{ draft.demo ? "进入模拟战场" : "连接服务器" }}
+          {{ draft.demo ? "Enter demo" : "Connect to server" }}
         </button>
       </form>
       <template v-else-if="modal === 'reset'"
         ><p class="dialog-note">
-          当前比分、血量和弹药将重置，所有坦克返回自由练习阶段。
+          Scores, health and ammo will reset. Both tanks will return to free practice.
         </p>
         <div class="management-buttons">
-          <button class="secondary" @click="closeDialog">取消</button
-          ><button class="primary" @click="resetMatch">确认重置</button>
+          <button class="secondary" @click="closeDialog">Cancel</button
+          ><button class="primary" @click="resetMatch">Confirm reset</button>
         </div></template
       >
       <template v-else-if="modal === 'help'"
         ><div class="help-grid">
           <span><kbd>W</kbd><kbd>S</kbd></span>
-          <p>前进 / 后退</p>
+          <p>Move forward / Reverse</p>
           <span><kbd>A</kbd><kbd>D</kbd></span>
-          <p>原地左转 / 右转</p>
-          <kbd>鼠标</kbd>
-          <p>在瞄准区移动以转动炮塔</p>
+          <p>Turn left / Turn right</p>
+          <kbd>Mouse</kbd>
+          <p>Move within the aiming area to rotate the turret</p>
           <kbd>SPACE</kbd>
-          <p>开火，每发间隔 1 秒</p>
+          <p>Fire, with a 1-second cooldown</p>
         </div>
         <p class="dialog-note">
-          失焦会清除按键并发送停车指令。倒计时、死亡、比赛结束和断线期间不能驾驶。比赛开始时炮塔回正到
-          0°。实物端仍需实现 300 ms 超时停车。
+          Leaving the window releases the controls and sends a stop command. Driving is disabled during countdown, while dead, after the match or when disconnected. The turret returns to 0° when the match starts.
         </p>
         <p class="dialog-note">
-          模拟模式中允许的射击会模拟命中，不模拟位置、红外和障碍。每个标签页的模拟比赛彼此独立。
+          In demo mode, valid shots simulate hits. Position, infrared signals and obstacles are not simulated. Each tab runs a separate match.
         </p>
         <button class="primary full" @click="closeDialog">
-          明白，准备出发
+          Got it. Ready to go.
         </button></template
       >
     </dialog>

@@ -54,7 +54,7 @@ export function socketUrl(base, role) {
   if (url.protocol === "http:") url.protocol = "ws:";
   if (url.protocol === "https:") url.protocol = "wss:";
   if (!["ws:", "wss:"].includes(url.protocol) || url.username || url.password)
-    throw new Error("请输入有效的 ws:// 或 wss:// 服务器地址");
+    throw new Error("Enter a valid ws:// or wss:// server address.");
   url.pathname = `/ws/${role}`;
   url.search = "";
   url.hash = "";
@@ -125,7 +125,7 @@ export function openSocket(settings, callbacks) {
     url.startsWith("ws:")
   )
     throw new Error(
-      "HTTPS 页面需要 wss://；本地树莓派 ws:// 请从 HTTP 页面连接",
+      "HTTPS pages require wss://. To connect to a local Raspberry Pi using ws://, open this page over HTTP.",
     );
   let ws = null;
   let stopped = false;
