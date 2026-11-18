@@ -11,7 +11,7 @@ from app.config import Settings
 from app.connections import Connection
 from app.constants import CONNECTION_TIMEOUT_MS, PING_INTERVAL_MS, WEB_STATE_INTERVAL_MS
 from app.errors import OperationError, ProtocolError
-from app.game import GameEngine, GameUpdate, monotonic_ms
+from app.game import GameEngine, GameUpdate, Phase, monotonic_ms
 from app.protocol import (
     Drive,
     Error,
@@ -48,6 +48,7 @@ class Arena:
         self.next_web_state_ms = clock() + WEB_STATE_INTERVAL_MS
         self._scheduler: asyncio.Task | None = None
         self._stopping = False
+        self._fire_owners: dict[int, Connection] = {}
 
     async def start(self) -> None:
         self._scheduler = asyncio.create_task(self._run_scheduler(), name="arena-scheduler")
@@ -160,8 +161,11 @@ class Arena:
                 update = self.game.start()
             else:
                 update = self.game.reset()
+            for client in self.connections:
+                client.discard_game_output()
             for tank in self.tanks.values():
                 tank.cancel_controls()
+            self._fire_owners.clear()
             self._publish_change(update)
         elif isinstance(message, Drive):
             if not self.game.enabled(connection.tank_id):
@@ -174,6 +178,7 @@ class Arena:
             if tank is None:
                 raise OperationError("坦克不在线")
             record = self.game.reserve_fire(connection.tank_id)
+            self._fire_owners[record.shooter] = connection
             tank.send(
                 TankFire(type="fire", shot=record.shot),
                 receipt=record.receipt,
@@ -201,19 +206,18 @@ class Arena:
         result = self.game.hit(connection.tank_id, message.shooter, message.shot)
         if not result.accepted:
             return
-        connection.send(TankEvent(kind="death" if result.killed else "hurt"))
+        self._send_tank_event(connection.tank_id, "death" if result.killed else "hurt")
         if result.killed:
             self._sync_tank_states()
-        shooter = self.tanks.get(message.shooter)
-        if shooter is not None:
-            shooter.send(TankEvent(kind="hit_confirm"))
+        self._send_tank_event(message.shooter, "hit_confirm")
         if result.killed:
             event = KillEvent(shooter=message.shooter, target=connection.tank_id)
         else:
             event = HitEvent(shooter=message.shooter, target=connection.tank_id, hp=result.hp)
+        round_id = self.game.round_id
         for client in self.connections:
             if client.registered and client.role != Role.TANK:
-                client.send(event)
+                client.send(event, is_valid=lambda: self.game.round_id == round_id)
         self._publish_change(result.update)
 
     def _detach(self, connection: Connection) -> None:
@@ -237,6 +241,32 @@ class Arena:
 
     def _advance(self) -> None:
         self._publish_change(self.game.advance())
+        for tank_id in tuple(self._fire_owners):
+            if tank_id not in self.game.pending_fires:
+                del self._fire_owners[tank_id]
+
+    def _send_tank_event(self, tank_id: int, kind: str) -> None:
+        connection = self.tanks.get(tank_id)
+        if connection is None:
+            return
+        round_id = self.game.round_id
+        life_id = self.game.tanks[tank_id].life_id
+
+        def is_current() -> bool:
+            if self.game.round_id != round_id:
+                return False
+            if kind == "game_start":
+                return self.game.phase == Phase.RUNNING
+            if kind in ("game_end", "hit_confirm"):
+                return True
+            tank = self.game.tanks[tank_id]
+            if tank.life_id != life_id:
+                return False
+            if kind == "death":
+                return not tank.alive and self.game.phase in (Phase.RUNNING, Phase.ENDED)
+            return tank.alive and self.game.phase in (Phase.LOBBY, Phase.RUNNING)
+
+        connection.send(TankEvent(kind=kind), is_valid=is_current)
 
     def _sync_tank_states(self) -> None:
         for tank_id, connection in self.tanks.items():
@@ -254,12 +284,10 @@ class Arena:
     def _publish_change(self, update: GameUpdate) -> None:
         self._sync_tank_states()
         for tank_id, kind in update.tank_events:
-            connection = self.tanks.get(tank_id)
-            if connection is not None:
-                connection.send(TankEvent(kind=kind))
+            self._send_tank_event(tank_id, kind)
         for tank_id in update.failed_fires:
-            connection = self.players.get(tank_id)
-            if connection is not None:
+            connection = self._fire_owners.pop(tank_id, None)
+            if connection is not None and self.players.get(tank_id) is connection:
                 connection.send(Error(message="开火指令发送失败或已过期，请重试"))
         if update.changed:
             self._broadcast_web_state()
@@ -282,7 +310,8 @@ class Arena:
             self._advance()
             if now >= self.next_web_state_ms:
                 self._broadcast_web_state()
-                self.next_web_state_ms = now + WEB_STATE_INTERVAL_MS
+                missed = (now - self.next_web_state_ms) // WEB_STATE_INTERVAL_MS + 1
+                self.next_web_state_ms += missed * WEB_STATE_INTERVAL_MS
 
     async def _run_scheduler(self) -> None:
         while True:

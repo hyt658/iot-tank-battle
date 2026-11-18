@@ -14,7 +14,7 @@ from app.config import RuntimeSettings
 from app.constants import DRIVE_TIMEOUT_MS, PING_INTERVAL_MS
 from app.delivery import DeliveryReceipt
 from app.game import monotonic_ms
-from app.protocol import Drive, Error, Message, Role, TankState, as_payload
+from app.protocol import Drive, Error, Message, Ping, Role, TankState, WebState, as_payload
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +68,7 @@ class Connection:
         self._drive_generation = 0
         self._drive_queued = False
         self._latest_drive: tuple[Drive, int] | None = None
+        self._pending_state: Packet | None = None
 
     def _enqueue(self, item: Packet | DriveSlot) -> bool:
         if not self.closing:
@@ -90,7 +91,32 @@ class Connection:
     ) -> bool:
         if isinstance(message, TankState) and not message.enable:
             self.cancel_controls()
-        return self._enqueue(Packet(as_payload(message), receipt, is_valid))
+        packet = Packet(as_payload(message), receipt, is_valid)
+        if isinstance(message, (TankState, WebState)) and not self.closing:
+            if self._pending_state is not None:
+                # Replace only within the same event interval, preserving causal order.
+                self._pending_state.payload = packet.payload
+                self._pending_state.is_valid = is_valid
+                return True
+            self._pending_state = packet
+        elif not isinstance(message, Ping):
+            self._pending_state = None
+        return self._enqueue(packet)
+
+    def discard_game_output(self) -> None:
+        """Drop unsent snapshots and events at an explicit round boundary."""
+        self._pending_state = None
+        retained = []
+        while not self.outbox.empty():
+            item = self.outbox.get_nowait()
+            if isinstance(item, Packet) and item.payload["type"] in ("state", "event"):
+                if "enable" in item.payload:
+                    self.last_enable = None
+                item.discard()
+            else:
+                retained.append(item)
+        for item in retained:
+            self.outbox.put_nowait(item)
 
     def send_drive(self, message: Drive) -> bool:
         if self.closing:
@@ -127,6 +153,7 @@ class Connection:
         self.outbox.put_nowait(CloseFrame(code, reason))
 
     def _discard_queued(self) -> None:
+        self._pending_state = None
         self._latest_drive = None
         self._drive_queued = False
         while not self.outbox.empty():
@@ -149,6 +176,8 @@ class Connection:
         try:
             while True:
                 item = await self.outbox.get()
+                if item is self._pending_state:
+                    self._pending_state = None
                 if isinstance(item, DriveSlot):
                     item = self._take_drive(item)
                     if item is None:

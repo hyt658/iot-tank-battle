@@ -265,13 +265,13 @@ class GameEngine:
     def _advance_lives(self, update: GameUpdate, now: int) -> None:
         for tank in self.tanks.values():
             if not tank.alive and tank.respawn_at_ms is not None and now >= tank.respawn_at_ms:
-                respawn_at = tank.respawn_at_ms
                 tank.alive = True
                 tank.hp, tank.ammo = MAX_HP, MAX_AMMO
                 tank.life_id += 1
                 tank.respawn_at_ms = None
-                tank.protected_until_ms = respawn_at + SPAWN_PROTECTION_MS
-                tank.next_ammo_ms = respawn_at + AMMO_REFILL_MS
+                # A late scheduler must still grant a full protection interval.
+                tank.protected_until_ms = now + SPAWN_PROTECTION_MS
+                tank.next_ammo_ms = now + AMMO_REFILL_MS
                 update.changed = True
                 update.tank_events.append((tank.id, "respawn"))
             if tank.alive and tank.next_ammo_ms is not None and now >= tank.next_ammo_ms:
@@ -291,6 +291,7 @@ class GameEngine:
         self.shots.clear()
         for tank in self.tanks.values():
             tank.respawn_at_ms = tank.next_ammo_ms = None
+            tank.protected_until_ms = 0
         update.changed = True
         update.tank_events.extend((tank_id, "game_end") for tank_id in TANK_IDS)
 
