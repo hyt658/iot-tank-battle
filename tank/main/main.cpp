@@ -25,5 +25,5 @@ extern "C" void app_main() {
 
     init_nvs();
     net::wifi::start(CONFIG_TANK_WIFI_SSID, CONFIG_TANK_WIFI_PASSWORD);
-    core::tank_logic::start(CONFIG_TANK_SERVER_URI, CONFIG_TANK_ID);
+    core::tank_logic::start(CONFIG_TANK_SERVER_HOST, CONFIG_TANK_ID);
 }

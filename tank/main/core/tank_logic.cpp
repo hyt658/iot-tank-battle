@@ -56,7 +56,7 @@ void hit_handler(uint8_t shooter, uint8_t shot);
 
 } // namespace
 
-void core::tank_logic::start(const char* server_uri, uint8_t tank_id) {
+void core::tank_logic::start(const char* server_host, uint8_t tank_id) {
     s_tank_id = tank_id;
     s_input_queue = xQueueCreate(QueueSize, sizeof(Input));
 
@@ -72,8 +72,9 @@ void core::tank_logic::start(const char* server_uri, uint8_t tank_id) {
     }
 
     hw::infrared::start(hit_handler);
+    auto uri = tank_uri(server_host, tank_id);
     net::link::start(
-        server_uri,
+        uri.c_str(),
         {
             .connect_handler = connect_handler,
             .disconnect_handler = disconnect_handler,
@@ -176,7 +177,11 @@ void process_message(const Message& msg) {
             }
             hw::infrared::send(s_tank_id, msg.shot);
             break;
-        case Message::Type::Event:
+        case Message::Type::Hurt:
+            [[fallthrough]];
+        case Message::Type::Death:
+            [[fallthrough]];
+        case Message::Type::Respawn:
             // TODO: how do we play the sound?
             break;
         case Message::Type::Error:
@@ -213,7 +218,7 @@ void process_hit(const Input::HitInfo& hit) {
 // ---------------------------------------------------------------------------
 
 void connect_handler() {
-    net::link::send_text(encode_hello(s_tank_id));
+    ESP_LOGD(TAG, "server connected");
     enqueue({.type = Input::Type::Connect});
 }
 
@@ -229,12 +234,13 @@ void text_handler(const char* data, size_t len) {
         return;
     }
 
-    if (msg->type == Message::Type::Error) {
-        ESP_LOGW(TAG, "server error: %.*s", static_cast<int>(len), data);
-        return;
-    }
     if (msg->type == Message::Type::Unknown) {
         ESP_LOGD(TAG, "unknown message: %.*s", static_cast<int>(len), data);
+        return;
+    }
+
+    if (msg->type == Message::Type::Error) {
+        ESP_LOGW(TAG, "server error: %.*s", static_cast<int>(len), data);
         return;
     }
 

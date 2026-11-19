@@ -8,9 +8,9 @@ menu "Tank Config"
         string "Wi-Fi password"
         default ""
 
-    config TANK_SERVER_URI
-        string "Server WebSocket URI"
-        default "ws://192.168.2.1:8000/ws/tank"
+    config TANK_SERVER_HOST
+        string "Server host and port"
+        default "192.168.2.1:8000"
 
     config TANK_ID
         int "Tank ID"

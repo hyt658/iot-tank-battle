@@ -8,8 +8,16 @@
 namespace core::protocol {
 
 struct Message {
-    enum class Type : uint8_t { Unknown, State, Drive, Fire, Event, Error };
-    enum class Event : uint8_t { GameStart, GameEnd, Respawn, Hurt, Death, HitConfirm };
+    enum class Type : uint8_t {
+        Unknown,
+        State,
+        Drive,
+        Fire,
+        Hurt,
+        Death,
+        Respawn,
+        Error
+    };
 
     struct Drive {
         int8_t left;   // [-100, 100], positive is forward.
@@ -20,7 +28,6 @@ struct Message {
     Type type;
     bool enable;
     Drive drive;
-    Event event;
     uint8_t shot; // [0, 15]
 };
 
@@ -32,9 +39,9 @@ struct Message {
 std::optional<Message> parse(const char* data, size_t len);
 
 /**
- * @brief Build the hello message, sent right after connecting to the server.
+ * @brief Build the URI to connect to the server.
  */
-std::string encode_hello(uint8_t tank_id);
+std::string tank_uri(const char* server_host, uint8_t tank_id);
 
 /**
  * @brief Build the hit message, sent when the IR receiver decodes a shot.

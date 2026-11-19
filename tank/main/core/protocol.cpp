@@ -18,7 +18,6 @@ std::optional<bool> get_bool(const cJSON* root, const char* key);
 std::optional<std::string_view> get_string(const cJSON* root, const char* key);
 
 Message::Type to_type(std::string_view name);
-std::optional<Message::Event> to_event_type(std::string_view kind);
 
 } // namespace
 
@@ -38,6 +37,12 @@ std::optional<Message> core::protocol::parse(const char* data, size_t len) {
 
     switch (msg.type) {
         case Message::Type::Unknown:
+            [[fallthrough]];
+        case Message::Type::Hurt:
+            [[fallthrough]];
+        case Message::Type::Death:
+            [[fallthrough]];
+        case Message::Type::Respawn:
             [[fallthrough]];
         case Message::Type::Error:
             break;
@@ -71,27 +76,13 @@ std::optional<Message> core::protocol::parse(const char* data, size_t len) {
             msg.shot = static_cast<uint8_t>(*shot);
             break;
         }
-        case Message::Type::Event: {
-            auto kind = get_string(root.get(), "kind");
-            if (!kind) {
-                return std::nullopt;
-            }
-            // Ignore unknown kinds
-            auto event = to_event_type(*kind);
-            if (!event) {
-                msg.type = Message::Type::Unknown;
-                break;
-            }
-            msg.event = *event;
-            break;
-        }
     }
 
     return msg;
 }
 
-std::string core::protocol::encode_hello(uint8_t tank_id) {
-    return R"({"type":"hello","tank_id":)" + std::to_string(tank_id) + "}";
+std::string core::protocol::tank_uri(const char* server_host, uint8_t tank_id) {
+    return "ws://" + std::string(server_host) + "/ws/tank/" + std::to_string(tank_id);
 }
 
 std::string core::protocol::encode_hit(uint8_t shooter, uint8_t shot) {
@@ -138,18 +129,10 @@ Message::Type to_type(std::string_view name) {
     if (name == "state") return Message::Type::State;
     if (name == "drive") return Message::Type::Drive;
     if (name == "fire") return Message::Type::Fire;
-    if (name == "event") return Message::Type::Event;
+    if (name == "hurt") return Message::Type::Hurt;
+    if (name == "death") return Message::Type::Death;
+    if (name == "respawn") return Message::Type::Respawn;
     return Message::Type::Unknown;
-}
-
-std::optional<Message::Event> to_event_type(std::string_view kind) {
-    if (kind == "game_start") return Message::Event::GameStart;
-    if (kind == "game_end") return Message::Event::GameEnd;
-    if (kind == "respawn") return Message::Event::Respawn;
-    if (kind == "hurt") return Message::Event::Hurt;
-    if (kind == "death") return Message::Event::Death;
-    if (kind == "hit_confirm") return Message::Event::HitConfirm;
-    return std::nullopt;
 }
 
 } // namespace
