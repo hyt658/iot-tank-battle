@@ -9,12 +9,14 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+#include "hw/buzzer.h"
 #include "hw/infrared.h"
 #include "hw/motor.h"
 #include "hw/turret.h"
 #include "net/link.h"
 
 using namespace core::protocol;
+using hw::buzzer::Note;
 
 namespace {
 
@@ -25,6 +27,19 @@ constexpr UBaseType_t QueueSize = 32;
 
 constexpr TickType_t DriveTimeout = pdMS_TO_TICKS(300);
 constexpr TickType_t HitDedupeTime = pdMS_TO_TICKS(1000);
+
+// Sounds of the game events. Keep each duration a multiple of the 10 ms tick.
+// NOLINTBEGIN
+constexpr Note HurtSound[] = {{2750, 40}, {1480, 60}, {880, 90}};
+constexpr Note FireSound[] = {{1151, 10}, {906, 10}, {712, 10}, {558, 10},
+                              {437, 10},  {341, 10}, {267, 10}, {209, 10},
+                              {163, 10},  {127, 10}, {99, 10},  {77, 20}};
+constexpr Note DeathSound[] = {{1260, 20}, {850, 30}, {1030, 20}, {610, 30}, {740, 30},
+                               {450, 30},  {525, 30}, {320, 30},  {380, 40}, {240, 40},
+                               {190, 40},  {135, 50}, {98, 50}};
+constexpr Note RespawnSound[] = {{391, 70}, {329, 60}, {391, 70}, {439, 70},
+                                 {391, 70}, {439, 60}, {493, 70}, {523, 70}};
+// NOLINTEND
 
 struct Input {
     enum class Type : uint8_t { Connect, Disconnect, Message, Hit };
@@ -71,6 +86,7 @@ void core::tank_logic::start(const char* server_host, uint8_t tank_id) {
         abort();
     }
 
+    hw::buzzer::start();
     hw::infrared::start(hit_handler);
     auto uri = tank_uri(server_host, tank_id);
     net::link::start(
@@ -176,13 +192,16 @@ void process_message(const Message& msg) {
                 break;
             }
             hw::infrared::send(s_tank_id, msg.shot);
+            hw::buzzer::play(FireSound);
             break;
         case Message::Type::Hurt:
-            [[fallthrough]];
+            hw::buzzer::play(HurtSound);
+            break;
         case Message::Type::Death:
-            [[fallthrough]];
+            hw::buzzer::play(DeathSound);
+            break;
         case Message::Type::Respawn:
-            // TODO: how do we play the sound?
+            hw::buzzer::play(RespawnSound);
             break;
         case Message::Type::Error:
             [[fallthrough]];
