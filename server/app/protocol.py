@@ -13,29 +13,18 @@ NonNegativeInt = Annotated[int, Field(strict=True, ge=0)]
 TrackSpeed = Annotated[int, Field(strict=True, ge=-100, le=100)]
 TurretAngle = Annotated[int, Field(strict=True, ge=-90, le=90)]
 ShotId = Annotated[int, Field(strict=True, ge=0, le=15)]
+TankEventType = Literal["hurt", "death", "respawn"]
+GAME_OUTPUT_TYPES = frozenset({"state", "hurt", "death", "respawn", "hit", "kill"})
 
 
 class Role(StrEnum):
     TANK = "tank"
     PLAYER = "player"
-    SPECTATOR = "spectator"
+    CONTROL = "control"
 
 
 class Message(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
-
-
-class TankHello(Message):
-    type: Literal["hello"]
-    tank_id: TankId
-
-
-class PlayerHello(TankHello):
-    name: str
-
-
-class SpectatorHello(Message):
-    type: Literal["hello"]
 
 
 class Pong(Message):
@@ -65,8 +54,7 @@ class Hit(Message):
 
 
 class GameCommand(Message):
-    type: Literal["game"]
-    action: Literal["start", "reset"]
+    type: Literal["start", "reset"]
 
 
 class Ping(Message):
@@ -85,21 +73,17 @@ class TankState(Message):
 
 
 class TankEvent(Message):
-    type: Literal["event"] = "event"
-    kind: Literal["hurt", "death", "hit_confirm", "respawn", "game_start", "game_end"]
+    type: TankEventType
 
 
 class HitEvent(Message):
-    type: Literal["event"] = "event"
-    kind: Literal["hit"] = "hit"
+    type: Literal["hit"] = "hit"
     shooter: TankId
     target: TankId
-    hp: Annotated[int, Field(ge=0, le=5)]
 
 
 class KillEvent(Message):
-    type: Literal["event"] = "event"
-    kind: Literal["kill"] = "kill"
+    type: Literal["kill"] = "kill"
     shooter: TankId
     target: TankId
 
@@ -114,6 +98,7 @@ class TankSnapshot(Message):
     kills: NonNegativeInt
     deaths: NonNegativeInt
     respawn_ms: NonNegativeInt
+    protected_ms: NonNegativeInt
 
 
 class WebState(Message):
@@ -124,12 +109,12 @@ class WebState(Message):
     tanks: Annotated[list[TankSnapshot], Field(min_length=2, max_length=2)]
 
 
-HELLO_MODELS = {Role.TANK: TankHello, Role.PLAYER: PlayerHello, Role.SPECTATOR: SpectatorHello}
 INBOUND_MODELS: dict[Role, dict[str, type[Message]]] = {
     Role.TANK: {"pong": Pong, "hit": Hit},
     Role.PLAYER: {"pong": Pong, "drive": Drive, "fire": Fire},
-    Role.SPECTATOR: {"pong": Pong, "game": GameCommand},
+    Role.CONTROL: {"pong": Pong, "start": GameCommand, "reset": GameCommand},
 }
+KNOWN_TYPES = (GAME_OUTPUT_TYPES | {"ping", "error"}).union(*INBOUND_MODELS.values())
 
 
 def _reject_constant(value: str) -> None:
@@ -146,22 +131,17 @@ def decode_message(text: str) -> dict[str, Any]:
     return payload
 
 
-def parse_message(role: Role, text: str, *, registered: bool) -> Message:
+def parse_message(role: Role, text: str) -> Message | None:
     payload = decode_message(text)
     kind = payload["type"]
-    if not registered:
-        if kind != "hello":
-            raise ProtocolError(
-                "The first message after connecting must be hello.", message_type=kind
-            )
-        model = HELLO_MODELS[role]
-    else:
-        model = INBOUND_MODELS[role].get(kind)
-        if model is None:
-            raise ProtocolError(
-                f"Messages of type {kind!a} are not allowed on {role.value} connections.",
-                message_type=kind,
-            )
+    if kind not in KNOWN_TYPES:
+        return None
+    model = INBOUND_MODELS[role].get(kind)
+    if model is None:
+        raise ProtocolError(
+            f"Messages of type {kind!a} are not allowed on {role.value} connections.",
+            message_type=kind,
+        )
     try:
         return model.model_validate(payload)
     except ValidationError as exc:

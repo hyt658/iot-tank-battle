@@ -9,7 +9,12 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from app.config import Settings
 from app.connections import Connection
-from app.constants import CONNECTION_TIMEOUT_MS, PING_INTERVAL_MS, WEB_STATE_INTERVAL_MS
+from app.constants import (
+    CONNECTION_TIMEOUT_MS,
+    PING_INTERVAL_MS,
+    REPLACED_CONNECTION_CLOSE_CODE,
+    WEB_STATE_INTERVAL_MS,
+)
 from app.errors import OperationError, ProtocolError
 from app.game import GameEngine, GameUpdate, Phase, monotonic_ms
 from app.protocol import (
@@ -21,14 +26,11 @@ from app.protocol import (
     HitEvent,
     KillEvent,
     Message,
-    Ping,
-    PlayerHello,
     Pong,
     Role,
-    SpectatorHello,
     TankEvent,
+    TankEventType,
     TankFire,
-    TankHello,
     TankState,
     parse_message,
 )
@@ -63,13 +65,21 @@ class Arena:
             for connection in tuple(self.connections):
                 connection.request_close(1001, "Server shutting down")
 
-    async def serve(self, websocket: WebSocket, role: Role) -> None:
+    async def serve(
+        self,
+        websocket: WebSocket,
+        role: Role,
+        *,
+        tank_id: int | None = None,
+        player_name: str | None = None,
+    ) -> None:
         await websocket.accept()
         connection = Connection(
-            websocket, role, self.clock(), self.settings.runtime, clock=self.clock
+            websocket, role, self.clock(), self.settings.runtime, clock=self.clock, tank_id=tank_id
         )
         async with self.lock:
-            self.connections.add(connection)
+            self._advance()
+            self._register(connection, player_name)
         writer = asyncio.create_task(connection.write(), name=f"{role.value}-writer")
         reader = asyncio.create_task(self._read(connection), name=f"{role.value}-reader")
         try:
@@ -97,22 +107,21 @@ class Arena:
             incoming = await connection.websocket.receive()
             if incoming["type"] == "websocket.disconnect":
                 return
+            received_at = self.clock()
             async with self.lock:
                 # Any incoming message counts as activity, not only a pong.
-                connection.last_received_ms = self.clock()
                 if connection.closing:
                     return
+                connection.last_received_ms = received_at
                 try:
-                    if incoming.get("text") is None:
+                    text = incoming.get("text")
+                    if text is None:
                         raise ProtocolError("Only JSON text messages are accepted.")
-                    message = parse_message(
-                        connection.role, incoming["text"], registered=connection.registered
-                    )
+                    message = parse_message(connection.role, text)
+                    if message is None:
+                        continue
                     self._advance()
-                    if not connection.registered:
-                        self._register(connection, message)
-                    else:
-                        self._dispatch(connection, message)
+                    self._dispatch(connection, message)
                 except OperationError as exc:
                     if isinstance(exc, ProtocolError) and exc.message_type == "hit":
                         logger.info(
@@ -120,64 +129,71 @@ class Arena:
                             connection.tank_id,
                             exc,
                         )
-                    if connection.registered:
-                        connection.send(Error(message=str(exc)))
-                    else:
-                        connection.request_close(1008, "Hello rejected", error=str(exc))
+                    connection.send(Error(message=str(exc)))
 
-    def _register(self, connection: Connection, message: Message) -> None:
-        if isinstance(message, PlayerHello):
-            if message.tank_id in self.players:
-                raise OperationError("This tank is already controlled by another player.")
-            connection.tank_id = message.tank_id
-            self.players[message.tank_id] = connection
-            self.game.tanks[message.tank_id].player = message.name
-        elif isinstance(message, TankHello):
-            previous = self.tanks.get(message.tank_id)
-            if previous is not None:
-                previous.request_close(1000, "Replaced by a new tank connection")
-                previous.registered = False
-                self.connections.discard(previous)
-            connection.tank_id = message.tank_id
-            self.tanks[message.tank_id] = connection
-            self.game.tanks[message.tank_id].online = True
-        elif not isinstance(message, SpectatorHello):
-            raise ProtocolError("The first message after connecting must be hello.")
-        connection.registered = True
-        if connection.role == Role.TANK:
-            self._sync_tank_states()
-        if connection.role == Role.SPECTATOR:
+    def _register(self, connection: Connection, player_name: str | None = None) -> None:
+        self.connections.add(connection)
+        if connection.role == Role.CONTROL:
             connection.send(self.game.snapshot())
+            return
+
+        tank_id = connection.tank_id
+        assert tank_id is not None
+        is_tank = connection.role == Role.TANK
+        slots = self.tanks if is_tank else self.players
+        previous = slots.get(tank_id)
+        slots[tank_id] = connection
+        if previous is not None:
+            previous.request_close(
+                REPLACED_CONNECTION_CLOSE_CODE, "Replaced by a new connection for this address."
+            )
+            self.connections.discard(previous)
+            if not is_tank and tank_id in self.tanks:
+                self.tanks[tank_id].cancel_controls()
+
+        tank = self.game.tanks[tank_id]
+        if is_tank:
+            tank.online = True
+            self._sync_tank_states()
         else:
-            self._broadcast_web_state()
+            tank.player = player_name
+        self._broadcast_web_state()
 
     def _dispatch(self, connection: Connection, message: Message) -> None:
         if isinstance(message, Pong):
             if message.ts not in connection.pending_pings:
                 raise ProtocolError("pong must echo the original server ts value.")
             connection.pending_pings.remove(message.ts)
-        elif isinstance(message, GameCommand):
-            if message.action == "start":
-                update = self.game.start()
-            else:
-                update = self.game.reset()
+            logger.info(
+                "Heartbeat RTT: connection=%x role=%s tank_id=%s rtt_ms=%d",
+                id(connection),
+                connection.role.value,
+                connection.tank_id,
+                connection.last_received_ms - message.ts,
+            )
+            return
+        if isinstance(message, GameCommand):
+            update = self.game.start() if message.type == "start" else self.game.reset()
             for client in self.connections:
                 client.discard_game_output()
             for tank in self.tanks.values():
                 tank.cancel_controls()
             self._fire_owners.clear()
             self._publish_change(update)
-        elif isinstance(message, Drive):
-            if not self.game.enabled(connection.tank_id):
+            return
+        tank_id = connection.tank_id
+        assert tank_id is not None
+        if isinstance(message, Drive):
+            if not self.game.enabled(tank_id):
                 return
-            tank = self._available_tank(connection.tank_id)
+            tank = self._available_tank(tank_id)
             if tank is not None:
                 tank.send_drive(message)
         elif isinstance(message, Fire):
-            tank = self._available_tank(connection.tank_id)
+            tank = self._available_tank(tank_id)
             if tank is None:
                 raise OperationError("Tank is offline.")
-            record = self.game.reserve_fire(connection.tank_id)
+            record = self.game.reserve_fire(tank_id)
             self._fire_owners[record.shooter] = connection
             tank.send(
                 TankFire(type="fire", shot=record.shot),
@@ -190,7 +206,7 @@ class Arena:
             if record.charged_ammo:
                 self._broadcast_web_state()
         elif isinstance(message, Hit):
-            self._handle_hit(connection, message)
+            self._handle_hit(tank_id, message)
 
     def _available_tank(self, tank_id: int) -> Connection | None:
         tank = self.tanks.get(tank_id)
@@ -202,21 +218,16 @@ class Arena:
             return None
         return tank
 
-    def _handle_hit(self, connection: Connection, message: Hit) -> None:
-        result = self.game.hit(connection.tank_id, message.shooter, message.shot)
+    def _handle_hit(self, target: int, message: Hit) -> None:
+        result = self.game.hit(target, message.shooter, message.shot)
         if not result.accepted:
             return
-        self._send_tank_event(connection.tank_id, "death" if result.killed else "hurt")
-        if result.killed:
-            self._sync_tank_states()
-        self._send_tank_event(message.shooter, "hit_confirm")
-        if result.killed:
-            event = KillEvent(shooter=message.shooter, target=connection.tank_id)
-        else:
-            event = HitEvent(shooter=message.shooter, target=connection.tank_id, hp=result.hp)
+        self._send_tank_event(target, "death" if result.killed else "hurt")
+        event_type = KillEvent if result.killed else HitEvent
+        event = event_type(shooter=message.shooter, target=target)
         round_id = self.game.round_id
         for client in self.connections:
-            if client.registered and client.role != Role.TANK:
+            if client.role != Role.TANK:
                 client.send(event, is_valid=lambda: self.game.round_id == round_id)
         self._publish_change(result.update)
 
@@ -235,7 +246,6 @@ class Arena:
             if tank is not None:
                 tank.cancel_controls(drive_only=True)
             changed = True
-        connection.registered = False
         if changed and not self._stopping:
             self._broadcast_web_state()
 
@@ -245,7 +255,7 @@ class Arena:
             if tank_id not in self.game.pending_fires:
                 del self._fire_owners[tank_id]
 
-    def _send_tank_event(self, tank_id: int, kind: str) -> None:
+    def _send_tank_event(self, tank_id: int, event_type: TankEventType) -> None:
         connection = self.tanks.get(tank_id)
         if connection is None:
             return
@@ -255,18 +265,14 @@ class Arena:
         def is_current() -> bool:
             if self.game.round_id != round_id:
                 return False
-            if kind == "game_start":
-                return self.game.phase == Phase.RUNNING
-            if kind in ("game_end", "hit_confirm"):
-                return True
             tank = self.game.tanks[tank_id]
             if tank.life_id != life_id:
                 return False
-            if kind == "death":
+            if event_type == "death":
                 return not tank.alive and self.game.phase in (Phase.RUNNING, Phase.ENDED)
             return tank.alive and self.game.phase in (Phase.LOBBY, Phase.RUNNING)
 
-        connection.send(TankEvent(kind=kind), is_valid=is_current)
+        connection.send(TankEvent(type=event_type), is_valid=is_current)
 
     def _sync_tank_states(self) -> None:
         for tank_id, connection in self.tanks.items():
@@ -278,13 +284,13 @@ class Arena:
     def _broadcast_web_state(self) -> None:
         snapshot = self.game.snapshot()
         for connection in self.connections:
-            if connection.registered and connection.role != Role.TANK:
+            if connection.role != Role.TANK:
                 connection.send(snapshot)
 
     def _publish_change(self, update: GameUpdate) -> None:
         self._sync_tank_states()
-        for tank_id, kind in update.tank_events:
-            self._send_tank_event(tank_id, kind)
+        for tank_id in update.respawned:
+            self._send_tank_event(tank_id, "respawn")
         for tank_id in update.failed_fires:
             connection = self._fire_owners.pop(tank_id, None)
             if connection is not None and self.players.get(tank_id) is connection:
@@ -300,13 +306,12 @@ class Arena:
                     self._detach(connection)
                     continue
                 if now - connection.last_received_ms >= CONNECTION_TIMEOUT_MS:
-                    error = None if connection.registered else "No hello received within 3 seconds."
-                    connection.request_close(1001, "Receive timeout", error=error)
+                    connection.request_close(1001, "Receive timeout")
                     self._detach(connection)
                 elif now >= connection.next_ping_ms:
-                    connection.pending_pings.append(now)
-                    connection.next_ping_ms = now + PING_INTERVAL_MS
-                    connection.send(Ping(ts=now))
+                    missed = (now - connection.next_ping_ms) // PING_INTERVAL_MS + 1
+                    connection.next_ping_ms += missed * PING_INTERVAL_MS
+                    connection.send_ping()
             self._advance()
             if now >= self.next_web_state_ms:
                 self._broadcast_web_state()

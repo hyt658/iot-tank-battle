@@ -57,7 +57,7 @@ class Tank:
 @dataclass
 class GameUpdate:
     changed: bool = False
-    tank_events: list[tuple[int, str]] = field(default_factory=list)
+    respawned: list[int] = field(default_factory=list)
     failed_fires: list[int] = field(default_factory=list)
 
 
@@ -126,13 +126,11 @@ class GameEngine:
         return GameUpdate(changed=True)
 
     def reset(self) -> GameUpdate:
-        was_active = self.phase in (Phase.COUNTDOWN, Phase.RUNNING)
         self._fresh_round()
         self.phase = Phase.LOBBY
         self.deadline_ms = None
         self.winner = None
-        events = [(tank_id, "game_end") for tank_id in TANK_IDS] if was_active else []
-        return GameUpdate(changed=True, tank_events=events)
+        return GameUpdate(changed=True)
 
     def reserve_fire(self, shooter: int) -> Shot:
         """Reserve ammo before queuing the command; advance reconciles delivery receipts."""
@@ -254,7 +252,6 @@ class GameEngine:
             for tank in self.tanks.values():
                 tank.next_ammo_ms = self.deadline_ms - MATCH_MS + AMMO_REFILL_MS
             update.changed = True
-            update.tank_events.extend((tank_id, "game_start") for tank_id in TANK_IDS)
         if self.phase == Phase.RUNNING:
             if now >= self.deadline_ms or any(t.kills >= WIN_KILLS for t in self.tanks.values()):
                 self._finish(update)
@@ -273,7 +270,10 @@ class GameEngine:
                 tank.protected_until_ms = now + SPAWN_PROTECTION_MS
                 tank.next_ammo_ms = now + AMMO_REFILL_MS
                 update.changed = True
-                update.tank_events.append((tank.id, "respawn"))
+                update.respawned.append(tank.id)
+            if tank.protected_until_ms and now >= tank.protected_until_ms:
+                tank.protected_until_ms = 0
+                update.changed = True
             if tank.alive and tank.next_ammo_ms is not None and now >= tank.next_ammo_ms:
                 amount = (now - tank.next_ammo_ms) // AMMO_REFILL_MS + 1
                 previous = tank.ammo
@@ -293,7 +293,6 @@ class GameEngine:
             tank.respawn_at_ms = tank.next_ammo_ms = None
             tank.protected_until_ms = 0
         update.changed = True
-        update.tank_events.extend((tank_id, "game_end") for tank_id in TANK_IDS)
 
     def snapshot(self) -> WebState:
         now = self.clock()
@@ -311,6 +310,7 @@ class GameEngine:
                 respawn_ms=max(0, tank.respawn_at_ms - now)
                 if tank.respawn_at_ms is not None
                 else 0,
+                protected_ms=max(0, tank.protected_until_ms - now),
             )
             for tank in self.tanks.values()
         ]

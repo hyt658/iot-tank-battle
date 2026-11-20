@@ -14,7 +14,16 @@ from app.config import RuntimeSettings
 from app.constants import DRIVE_TIMEOUT_MS, PING_INTERVAL_MS
 from app.delivery import DeliveryReceipt
 from app.game import monotonic_ms
-from app.protocol import Drive, Error, Message, Ping, Role, TankState, WebState, as_payload
+from app.protocol import (
+    GAME_OUTPUT_TYPES,
+    Drive,
+    Message,
+    Ping,
+    Role,
+    TankState,
+    WebState,
+    as_payload,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +50,10 @@ class DriveSlot:
     generation: int
 
 
+class Heartbeat:
+    """A ping waiting for the writer to assign its send timestamp."""
+
+
 class Connection:
     def __init__(
         self,
@@ -50,19 +63,19 @@ class Connection:
         settings: RuntimeSettings,
         *,
         clock: Callable[[], int] = monotonic_ms,
+        tank_id: int | None = None,
     ) -> None:
         self.websocket = websocket
         self.role = role
         self.settings = settings
         self.clock = clock
-        self.tank_id: int | None = None
-        self.registered = False
+        self.tank_id = tank_id
         self.closing = False
         self.last_received_ms = now
         self.next_ping_ms = now + PING_INTERVAL_MS
         self.pending_pings: deque[int] = deque(maxlen=4)
         self.last_enable: bool | None = None
-        self.outbox: asyncio.Queue[Packet | CloseFrame | DriveSlot] = asyncio.Queue(
+        self.outbox: asyncio.Queue[Packet | CloseFrame | DriveSlot | Heartbeat] = asyncio.Queue(
             maxsize=settings.outbound_queue_size
         )
         self._drive_generation = 0
@@ -70,7 +83,7 @@ class Connection:
         self._latest_drive: tuple[Drive, int] | None = None
         self._pending_state: Packet | None = None
 
-    def _enqueue(self, item: Packet | DriveSlot) -> bool:
+    def _enqueue(self, item: Packet | DriveSlot | Heartbeat) -> bool:
         if not self.closing:
             try:
                 self.outbox.put_nowait(item)
@@ -103,13 +116,16 @@ class Connection:
             self._pending_state = None
         return self._enqueue(packet)
 
+    def send_ping(self) -> None:
+        self._enqueue(Heartbeat())
+
     def discard_game_output(self) -> None:
         """Drop unsent snapshots and events at an explicit round boundary."""
         self._pending_state = None
         retained = []
         while not self.outbox.empty():
             item = self.outbox.get_nowait()
-            if isinstance(item, Packet) and item.payload["type"] in ("state", "event"):
+            if isinstance(item, Packet) and item.payload["type"] in GAME_OUTPUT_TYPES:
                 if "enable" in item.payload:
                     self.last_enable = None
                 item.discard()
@@ -143,13 +159,11 @@ class Connection:
         for item in retained:
             self.outbox.put_nowait(item)
 
-    def request_close(self, code: int, reason: str, error: str | None = None) -> None:
+    def request_close(self, code: int, reason: str) -> None:
         if self.closing:
             return
         self.closing = True
         self._discard_queued()
-        if error is not None:
-            self.outbox.put_nowait(Packet(as_payload(Error(message=error))))
         self.outbox.put_nowait(CloseFrame(code, reason))
 
     def _discard_queued(self) -> None:
@@ -182,6 +196,10 @@ class Connection:
                     item = self._take_drive(item)
                     if item is None:
                         continue
+                if isinstance(item, Heartbeat):
+                    ts = self.clock()
+                    self.pending_pings.append(ts)
+                    item = Packet(as_payload(Ping(ts=ts)))
                 if isinstance(item, Packet) and item.is_valid is not None and not item.is_valid():
                     item.discard()
                     continue
