@@ -1,13 +1,19 @@
-import { MockArena } from "./mockArena.js";
-
-const record = (v) => typeof v === "object" && v !== null;
+const record = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 const integer = (v, min = 0, max = Number.MAX_SAFE_INTEGER) =>
-  typeof v === "number" && Number.isSafeInteger(v) && v >= min && v <= max;
-const id = (v) => v === 1 || v === 2;
+  Number.isSafeInteger(v) && v >= min && v <= max;
+const tankId = (v) => v === 1 || v === 2;
+
+export function pageRoute(path) {
+  if (path === "/control" || path === "/control/")
+    return { role: "control", tankId: null };
+  const match = /^\/player\/([12])\/?$/.exec(path);
+  return match ? { role: "player", tankId: Number(match[1]) } : null;
+}
+
 function isTank(v) {
   return (
     record(v) &&
-    id(v.id) &&
+    tankId(v.id) &&
     (v.player === null || typeof v.player === "string") &&
     typeof v.online === "boolean" &&
     typeof v.alive === "boolean" &&
@@ -15,9 +21,11 @@ function isTank(v) {
     integer(v.ammo, 0, 10) &&
     integer(v.kills) &&
     integer(v.deaths) &&
-    integer(v.respawn_ms)
+    integer(v.respawn_ms) &&
+    integer(v.protected_ms)
   );
 }
+
 export function parseServerMessage(text) {
   let v;
   try {
@@ -26,13 +34,13 @@ export function parseServerMessage(text) {
     return null;
   }
   if (!record(v)) return null;
-  if (v.type === "ping" && integer(v.ts)) return v;
+  if (v.type === "ping" && Number.isSafeInteger(v.ts)) return v;
   if (v.type === "error" && typeof v.message === "string") return v;
   if (
     v.type === "state" &&
-    ["lobby", "countdown", "running", "ended"].includes(String(v.status)) &&
+    ["lobby", "countdown", "running", "ended"].includes(v.status) &&
     integer(v.time_left_ms) &&
-    (v.winner === null || id(v.winner)) &&
+    (v.winner === null || tankId(v.winner)) &&
     Array.isArray(v.tanks) &&
     v.tanks.length === 2 &&
     v.tanks.every(isTank) &&
@@ -40,109 +48,83 @@ export function parseServerMessage(text) {
   )
     return v;
   if (
-    v.type === "event" &&
-    id(v.shooter) &&
-    id(v.target) &&
-    v.shooter !== v.target &&
-    (v.kind === "kill" || (v.kind === "hit" && integer(v.hp, 0, 5)))
+    ["hit", "kill"].includes(v.type) &&
+    tankId(v.shooter) &&
+    tankId(v.target) &&
+    v.shooter !== v.target
   )
     return v;
   return null;
 }
-export function socketUrl(base, role) {
-  const url = new URL(base.trim());
+
+export function socketUrl(settings) {
+  const url = new URL(settings.server.trim());
   if (url.protocol === "http:") url.protocol = "ws:";
   if (url.protocol === "https:") url.protocol = "wss:";
   if (!["ws:", "wss:"].includes(url.protocol) || url.username || url.password)
-    throw new Error("Enter a valid ws:// or wss:// server address.");
-  url.pathname = `/ws/${role}`;
+    throw new Error("Enter a valid HTTP(S) or WS(S) server address.");
   url.search = "";
   url.hash = "";
+  if (settings.role === "control") url.pathname = "/ws/control";
+  else if (
+    settings.role === "player" &&
+    tankId(settings.tankId) &&
+    settings.name?.trim()
+  ) {
+    url.pathname = `/ws/player/${settings.tankId}`;
+    url.searchParams.set("name", settings.name.trim());
+  } else throw new Error("Choose a valid tank and enter your player name.");
   return url.toString();
 }
-export function hello(settings) {
-  return settings.role === "spectator"
-    ? { type: "hello" }
-    : {
-        type: "hello",
-        tank_id: settings.tankId,
-        name: settings.name.trim() || "Player",
-      };
-}
+
 export function allowedMessage(role, message) {
-  if (message.type === "drive" || message.type === "fire")
-    return role === "player";
-  if (message.type === "game") return role === "spectator";
-  return true;
-}
-export function canDrive(state, tankId) {
-  const tank = state?.tanks.find((t) => t.id === tankId);
+  if (message.type === "pong") return Number.isSafeInteger(message.ts);
+  if (role === "control")
+    return message.type === "start" || message.type === "reset";
+  if (role !== "player") return false;
+  if (message.type === "fire") return true;
   return (
-    !!tank?.online &&
-    !!tank.alive &&
-    (state?.status === "lobby" || state?.status === "running")
+    message.type === "drive" &&
+    integer(message.left, -100, 100) &&
+    integer(message.right, -100, 100) &&
+    integer(message.turret, -90, 90)
   );
 }
 
-// One simulation per tab. Switching player/spectator keeps the same match.
-export const demoArena = new MockArena();
-export function openDemo(settings, callbacks) {
-  let closed = false;
-  const deliver = () => {
-    if (closed) return;
-    demoArena.drain().forEach(callbacks.message);
-    callbacks.message(demoArena.snapshot());
-  };
-  demoArena.command(hello(settings), settings, Date.now());
-  queueMicrotask(() => {
-    if (!closed) {
-      callbacks.status("connected");
-      deliver();
-    }
-  });
-  const timer = setInterval(() => {
-    demoArena.tick(Date.now(), settings.tankId);
-    deliver();
-  }, 200);
-  return {
-    send(message) {
-      if (closed || !allowedMessage(settings.role, message)) return false;
-      demoArena.command(message, settings, Date.now());
-      deliver();
-      return true;
-    },
-    close() {
-      closed = true;
-      clearInterval(timer);
-    },
-  };
+export function canDrive(state, id) {
+  const tank = state?.tanks.find((t) => t.id === id);
+  return !!(
+    tank?.online &&
+    tank.alive &&
+    tank.player &&
+    ["lobby", "running"].includes(state.status)
+  );
 }
+
 export function openSocket(settings, callbacks) {
-  const url = socketUrl(settings.server, settings.role);
+  const url = socketUrl(settings);
   if (
     typeof location !== "undefined" &&
     location.protocol === "https:" &&
     url.startsWith("ws:")
   )
     throw new Error(
-      "HTTPS pages require wss://. To connect to a local Raspberry Pi using ws://, open this page over HTTP.",
+      "HTTPS pages require wss://. Open the local server over HTTP to use ws://.",
     );
-  let ws = null;
+  let ws, retry, watchdog;
   let stopped = false;
-  let retry;
-  let watchdog;
-  let lastReceived = 0;
-  let hasState = false;
-  let rejectHello = false;
+  let ready = false;
   const send = (message) => {
     if (
       stopped ||
       !allowedMessage(settings.role, message) ||
-      ws?.readyState !== WebSocket.OPEN
+      ws?.readyState !== WebSocket.OPEN ||
+      (!ready && message.type !== "pong")
     )
       return false;
-    // Avoid building a stale drive backlog on a congested connection.
     if (ws.bufferedAmount > 16384) {
+      ready = false;
+      callbacks.status("reconnecting");
       ws.close();
       return false;
     }
@@ -151,22 +133,21 @@ export function openSocket(settings, callbacks) {
   };
   function connect() {
     if (stopped) return;
-    hasState = false;
-    rejectHello = false;
+    ready = false;
     callbacks.status("connecting");
-    ws = new WebSocket(url);
-    ws.onopen = () => {
-      lastReceived = Date.now();
-      send(hello(settings));
-      watchdog = setInterval(() => {
-        if (Date.now() - lastReceived > 3000) {
-          callbacks.status("reconnecting");
-          ws?.close();
-        }
-      }, 250);
-    };
-    ws.onmessage = (event) => {
-      if (stopped) return;
+    const socket = new WebSocket(url);
+    ws = socket;
+    let lastReceived = Date.now();
+    // Cover a stalled handshake as well as a lost established connection.
+    watchdog = setInterval(() => {
+      if (!stopped && ws === socket && Date.now() - lastReceived >= 3000) {
+        ready = false;
+        callbacks.status("reconnecting");
+        socket.close();
+      }
+    }, 100);
+    socket.onmessage = (event) => {
+      if (stopped || ws !== socket) return;
       lastReceived = Date.now();
       const message = parseServerMessage(String(event.data));
       if (!message) return;
@@ -175,21 +156,29 @@ export function openSocket(settings, callbacks) {
         return;
       }
       if (message.type === "state") {
-        hasState = true;
+        ready = true;
+        // Apply state before enabling controls, so stale state cannot authorize driving.
+        callbacks.message(message);
         callbacks.status("connected");
-      }
-      if (message.type === "error" && !hasState) rejectHello = true;
-      callbacks.message(message);
+      } else callbacks.message(message);
     };
-    ws.onerror = () => {
-      /* The close event owns retry, preventing duplicate retries. */
+    socket.onerror = () => {
+      /* onclose handles retries. */
     };
-    ws.onclose = () => {
+    socket.onclose = (event) => {
+      if (stopped || ws !== socket) return;
+      ready = false;
       clearInterval(watchdog);
-      if (stopped) return;
-      // A rejected identity requires user correction, rather than an endless reconnect loop.
-      if (rejectHello) {
+      if (event.code === 4000 || event.code === 4001) {
         callbacks.status("disconnected");
+        callbacks.message({
+          type: "error",
+          message:
+            event.reason ||
+            (event.code === 4001
+              ? "Another player connection took over this tank. Automatic reconnect is stopped."
+              : "The server rejected this address. Check your connection settings."),
+        });
         return;
       }
       callbacks.status("reconnecting");
@@ -201,13 +190,11 @@ export function openSocket(settings, callbacks) {
     send,
     close() {
       stopped = true;
+      ready = false;
       clearTimeout(retry);
       clearInterval(watchdog);
       if (ws) {
-        ws.onopen = null;
-        ws.onmessage = null;
-        ws.onerror = null;
-        ws.onclose = null;
+        ws.onmessage = ws.onclose = ws.onerror = null;
         ws.close();
       }
     },
