@@ -87,6 +87,7 @@ void core::tank_logic::start(const char* server_host, uint8_t tank_id) {
     }
 
     auto uri = tank_uri(server_host, tank_id);
+    hw::motor::start();
     hw::turret::start();
     hw::infrared::start(hit_handler);
     hw::buzzer::start();
