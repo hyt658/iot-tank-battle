@@ -12,10 +12,28 @@ import { canDrive, openSocket, pageRoute, socketUrl } from "./connection.js";
 import { createDriveController } from "./controls.js";
 
 const route = pageRoute(location.pathname);
+const home = ["/", "/index.html"].includes(location.pathname);
 const player = route?.role === "player";
+const stations = [
+  { path: "/player/1", label: "Tank 01", current: route?.tankId === 1 },
+  { path: "/player/2", label: "Tank 02", current: route?.tankId === 2 },
+  { path: "/control", label: "Console", current: route?.role === "control" },
+];
+const serverKey = "tank-arena.server";
+function initialServer() {
+  try {
+    const saved = sessionStorage.getItem(serverKey);
+    if (saved) return saved;
+  } catch {
+    // Storage may be disabled by the browser.
+  }
+  return import.meta.env.DEV
+    ? `${location.protocol}//${location.hostname}:8000`
+    : location.origin;
+}
 const settings = ref({
   ...route,
-  server: import.meta.env.DEV ? "http://127.0.0.1:8000" : location.origin,
+  server: initialServer(),
   name: new URLSearchParams(location.search).get("name")?.trim() || "",
 });
 const joined = ref(!player || !!settings.value.name);
@@ -358,6 +376,12 @@ function applySettings() {
   try {
     const next = { ...draft.value, ...route, name: draft.value.name.trim() };
     socketUrl(next);
+    next.server = new URL(next.server.trim()).origin;
+    try {
+      sessionStorage.setItem(serverKey, next.server);
+    } catch {
+      // The selected server still applies to the current page.
+    }
     if (player) {
       const url = new URL(location.href);
       url.searchParams.set("name", next.name);
@@ -426,9 +450,9 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <main v-if="!route" class="not-found">
-    <span class="eyebrow">TANK ARENA / 404</span>
-    <h1>Page not found.</h1>
+  <main v-if="!route" class="station-picker">
+    <span class="eyebrow">{{ home ? "TANK ARENA" : "TANK ARENA / 404" }}</span>
+    <h1>{{ home ? "Choose your station." : "Page not found." }}</h1>
     <p>Choose a player station or open the control console.</p>
     <nav class="management-buttons" aria-label="Available pages">
       <a class="primary" href="/player/1">Tank 01</a>
@@ -445,8 +469,6 @@ onUnmounted(() => {
       <a
         class="brand"
         href="/control"
-        :target="player ? '_blank' : undefined"
-        rel="noopener noreferrer"
         aria-label="Tank Arena control console"
       >
         <span class="brand-mark">⊕</span
@@ -456,19 +478,13 @@ onUnmounted(() => {
         >
       </a>
       <nav aria-label="Main navigation">
-        <a :class="{ selected: player && route.tankId === 1 }" href="/player/1"
-          >Tank 01</a
-        >
-        <a :class="{ selected: player && route.tankId === 2 }" href="/player/2"
-          >Tank 02</a
-        >
         <a
-          :class="{ selected: !player }"
-          href="/control"
-          :target="player ? '_blank' : undefined"
-          rel="noopener noreferrer"
-          >Console</a
-        >
+          v-for="station in stations"
+          :key="station.path"
+          :class="{ selected: station.current }"
+          :aria-current="station.current ? 'page' : undefined"
+          :href="station.current ? undefined : station.path"
+        >{{ station.label }}</a>
       </nav>
       <div class="header-tools">
         <span
@@ -940,7 +956,7 @@ onUnmounted(() => {
         <p class="dialog-note">
           {{
             player
-              ? `This page controls Tank 0${route.tankId}. A new connection replaces the previous player for this tank. Open Console in a separate tab to keep driving.`
+              ? `This page controls Tank 0${route.tankId}. Leaving this page disconnects the player. A new connection replaces the previous player for this tank.`
               : "The console can run on several screens at once. Only the console can start or reset a match."
           }}
         </p>

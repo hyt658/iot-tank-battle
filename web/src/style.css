@@ -983,11 +983,11 @@ dialog::backdrop {
   color: var(--muted);
   min-height: 150px;
 }
-.not-found {
+.station-picker {
   padding-top: 12vh;
   max-width: 800px;
 }
-.not-found p {
+.station-picker p {
   margin: 24px 0;
   color: var(--muted);
 }

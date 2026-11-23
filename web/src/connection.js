@@ -63,6 +63,10 @@ export function socketUrl(settings) {
   if (url.protocol === "https:") url.protocol = "wss:";
   if (!["ws:", "wss:"].includes(url.protocol) || url.username || url.password)
     throw new Error("Enter a valid HTTP(S) or WS(S) server address.");
+  if (globalThis.location?.protocol === "https:" && url.protocol === "ws:")
+    throw new Error(
+      "HTTPS pages require wss://. Open the local server over HTTP to use ws://.",
+    );
   url.search = "";
   url.hash = "";
   if (settings.role === "control") url.pathname = "/ws/control";
@@ -103,14 +107,6 @@ export function canDrive(state, id) {
 
 export function openSocket(settings, callbacks) {
   const url = socketUrl(settings);
-  if (
-    typeof location !== "undefined" &&
-    location.protocol === "https:" &&
-    url.startsWith("ws:")
-  )
-    throw new Error(
-      "HTTPS pages require wss://. Open the local server over HTTP to use ws://.",
-    );
   let ws, retry, watchdog;
   let stopped = false;
   let ready = false;
