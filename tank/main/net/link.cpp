@@ -2,7 +2,9 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
+#include <optional>
 #include <string_view>
 
 #include "cJSON.h"
@@ -21,9 +23,14 @@ constexpr int ReconnectTimeoutMs = 1000;
 constexpr TickType_t SendTimeout = pdMS_TO_TICKS(100);
 constexpr size_t PingIntervalSec = 1;
 constexpr int PongTimeoutSec = 3;
+constexpr int MaxMessageSize = 512;
 
 esp_websocket_client_handle_t s_client = nullptr;
 net::link::Handlers s_handlers = {};
+
+// One frame may arrive in several pieces due to TCP segmentation, so we store them here
+// until it is complete.
+char s_frame[MaxMessageSize];
 
 // We only want to invoke the disconnect_handler when an established connection drops, not
 // on every failed reconnect attempt. Therefore, we track the connection state ourselves.
@@ -100,6 +107,30 @@ bool handle_ping(const char* data, size_t len) {
     return true;
 }
 
+// Put the pieces together by offset and return the frame, or nullopt if incomplete.
+std::optional<std::string_view> assemble_frame(const esp_websocket_event_data_t* data) {
+    if (data->data_len == data->payload_len) {
+        return std::string_view(data->data_ptr, data->data_len);
+    }
+
+    if (data->payload_len > MaxMessageSize) {
+        if (data->payload_offset == 0) {
+            ESP_LOGW(
+                TAG, "dropped a message too large to put together (%d bytes)",
+                data->payload_len
+            );
+        }
+        return std::nullopt;
+    }
+
+    std::memcpy(s_frame + data->payload_offset, data->data_ptr, data->data_len);
+    if (data->payload_offset + data->data_len < data->payload_len) {
+        return std::nullopt;
+    }
+
+    return std::string_view(s_frame, data->payload_len);
+}
+
 void ws_event_handler(
     void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data
 ) {
@@ -116,16 +147,16 @@ void ws_event_handler(
                 s_handlers.connect_handler();
             }
             break;
-        case WEBSOCKET_EVENT_DATA:
+        case WEBSOCKET_EVENT_DATA: {
             // Ping, pong and close frames also arrive here.
             // We only care about text frames.
             if (data->op_code != WS_TRANSPORT_OPCODES_TEXT) {
                 break;
             }
 
-            // Websocket allows to send messages in multiple frames. We only support
-            // single-frame messages, so drop the rest.
-            if (!data->fin || data->data_len != data->payload_len) {
+            // WebSocket allows a message to be sent in several frames. Our messages
+            // are short, so we only support single-frame messages for simplicity.
+            if (!data->fin) {
                 if (data->payload_offset == 0) {
                     ESP_LOGW(
                         TAG, "dropped a split message (%d bytes)", data->payload_len
@@ -134,14 +165,20 @@ void ws_event_handler(
                 break;
             }
 
-            if (handle_ping(data->data_ptr, data->data_len)) {
+            auto text = assemble_frame(data);
+            if (!text) {
+                break;
+            }
+
+            if (handle_ping(text->data(), text->size())) {
                 break;
             }
 
             if (s_handlers.text_handler) {
-                s_handlers.text_handler(data->data_ptr, data->data_len);
+                s_handlers.text_handler(text->data(), text->size());
             }
             break;
+        }
         case WEBSOCKET_EVENT_DISCONNECTED:
             [[fallthrough]];
         case WEBSOCKET_EVENT_CLOSED:
