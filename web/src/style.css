@@ -1,5 +1,5 @@
 :root {
-  font-family: Inter, "Segoe UI", sans-serif;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: #e8ece5;
   background: #101411;
   font-synthesis: none;
@@ -60,7 +60,7 @@ p {
 .compass,
 kbd,
 time {
-  font-family: "Cascadia Code", Consolas, monospace;
+  font-family: ui-monospace, "SF Mono", Menlo, "Cascadia Code", Consolas, monospace;
 }
 main {
   max-width: 1520px;
@@ -90,9 +90,10 @@ main {
   place-items: center;
   background: var(--lime);
   color: #213113;
-  width: 39px;
-  height: 43px;
-  font-size: 28px;
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  font-size: 26px;
 }
 .brand-light {
   font-weight: 350;
@@ -191,6 +192,25 @@ h1 {
   font-weight: 650;
   line-height: 1.3;
 }
+.primary,
+.secondary,
+.fire-button,
+.stop-button,
+.pad-key,
+.icon-button,
+.topbar nav a {
+  transition:
+    background-color 0.12s,
+    border-color 0.12s,
+    color 0.12s,
+    transform 0.08s;
+}
+.primary:active:not(:disabled),
+.secondary:active:not(:disabled),
+.fire-button:active:not(:disabled),
+.stop-button:active:not(:disabled) {
+  transform: translateY(1px);
+}
 .primary {
   background: var(--lime);
   color: #203010;
@@ -204,6 +224,24 @@ h1 {
 }
 .secondary:hover:not(:disabled) {
   background: #303d2b;
+  border-color: var(--lime);
+}
+.fire-button:hover:not(:disabled) {
+  background: #d6ff98;
+}
+.stop-button:hover:not(:disabled) {
+  background: #4a3529;
+}
+.stop-button.resume:hover:not(:disabled) {
+  background: #31492a;
+}
+.pad-key:hover:not(:disabled) {
+  background: #344230;
+}
+.pad-key.active:not(:disabled) {
+  background: var(--lime);
+  border-color: var(--lime);
+  color: #203010;
 }
 .full {
   width: 100%;
@@ -307,9 +345,9 @@ h1 {
   align-items: start;
 }
 .battle-grid.pilot {
-  grid-template-columns: minmax(240px, 1.1fr) minmax(330px, 1.5fr) minmax(
+  grid-template-columns: minmax(240px, 1fr) minmax(360px, 2fr) minmax(
       210px,
-      0.85fr
+      0.9fr
     );
 }
 .pilot .first-tank {
@@ -462,7 +500,7 @@ h1 {
   background: repeating-linear-gradient(
     0deg,
     transparent 0 4px,
-    #77945e 4px 5px
+    color-mix(in srgb, var(--tank-color) 55%, #101411) 4px 5px
   );
 }
 .tank-glyph .left {
@@ -475,7 +513,7 @@ h1 {
   inset: 9px 11px 7px;
   border-radius: 5px;
   border: 1px solid var(--tank-color);
-  background: #536c39;
+  background: color-mix(in srgb, var(--tank-color) 42%, #101411);
 }
 .tank-glyph .turret {
   width: 22px;
@@ -492,7 +530,7 @@ h1 {
   height: 28px;
   width: 4px;
   background: var(--tank-color);
-  border: 1px solid #536c39;
+  border: 1px solid color-mix(in srgb, var(--tank-color) 42%, #101411);
 }
 .section-label {
   display: flex;
@@ -509,86 +547,119 @@ h1 {
 }
 .aim-area {
   position: relative;
-  height: 300px;
   cursor: crosshair;
   margin-top: 12px;
   border-radius: 6px;
-  background: radial-gradient(ellipse, #3b532329, transparent 70%);
   overflow: hidden;
+  --team: var(--lime);
+  user-select: none;
 }
-.radar {
-  position: absolute;
-  width: 216px;
-  height: 216px;
-  top: 36px;
-  left: 50%;
-  transform: translateX(-50%);
-  border: 1px solid #4e6035;
-  border-radius: 50%;
-  background: repeating-conic-gradient(
-    from 0deg,
-    #8ca76025 0deg 0.5deg,
-    transparent 0.5deg 15deg
-  );
+.aim-area.team-2 {
+  --team: var(--orange);
 }
-.radar-inner {
-  position: absolute;
-  inset: 37px;
-  border: 1px dashed #5c704060;
-  border-radius: 50%;
-  background: #1d281a;
+.aim-area.locked {
+  cursor: not-allowed;
 }
-.hero-tank {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -43%) scale(1.6);
-  z-index: 2;
+.turret-dial {
+  display: block;
+  width: 100%;
+  height: auto;
+  /* Keep the fire button on screen without scrolling. */
+  max-height: max(320px, calc(100dvh - 555px));
 }
-.aim-line {
-  position: absolute;
-  width: 1px;
-  height: 100px;
-  bottom: 50%;
-  left: 50%;
-  transform-origin: bottom;
-  background: linear-gradient(transparent, #b8eb6e);
-  z-index: 1;
+.dial-sector {
+  fill: color-mix(in srgb, var(--team) 7%, transparent);
+  stroke: color-mix(in srgb, var(--team) 45%, transparent);
+  stroke-width: 2;
 }
-.aim-line:before {
-  content: "";
-  position: absolute;
-  width: 9px;
-  height: 9px;
-  left: -4px;
-  top: -5px;
-  border: 1px solid var(--lime);
-  border-radius: 50%;
+.dial-ring {
+  fill: none;
+  stroke: color-mix(in srgb, var(--team) 28%, transparent);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 7;
 }
-.compass {
-  font-size: 12px;
-  color: #b9c5ab;
-  position: absolute;
-  z-index: 3;
+.dial-tick {
+  stroke: color-mix(in srgb, var(--team) 35%, transparent);
+  stroke-width: 2;
 }
-.north {
-  top: 8px;
-  left: 50%;
-  transform: translateX(-50%);
+.dial-tick.major {
+  stroke: color-mix(in srgb, var(--team) 75%, transparent);
+  stroke-width: 3;
 }
-.west {
-  top: 140px;
-  left: 0;
+.dial-label {
+  fill: #b9c5ab;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 19px;
+  text-anchor: middle;
 }
-.east {
-  top: 140px;
-  right: 0;
+.aim-ray {
+  stroke: var(--team);
+  stroke-width: 2;
+  stroke-dasharray: 8 7;
+  opacity: 0.75;
+}
+.aim-reticle {
+  fill: none;
+  stroke: var(--team);
+  stroke-width: 3;
+}
+.aim-dot {
+  fill: var(--team);
+}
+.tank-track {
+  fill: #1b211c;
+  stroke: var(--team);
+  stroke-width: 2.5;
+}
+.tank-tread {
+  stroke: color-mix(in srgb, var(--team) 50%, #101411);
+  stroke-width: 32;
+  stroke-dasharray: 6 12;
+}
+.tank-hull {
+  fill: color-mix(in srgb, var(--team) 34%, #101411);
+  stroke: var(--team);
+  stroke-width: 2.5;
+}
+.tank-detail {
+  fill: none;
+  stroke: color-mix(in srgb, var(--team) 60%, #101411);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+.tank-barrel,
+.tank-muzzle {
+  fill: var(--team);
+  stroke: #101411;
+  stroke-width: 2;
+}
+.tank-turret {
+  fill: var(--team);
+  stroke: #101411;
+  stroke-width: 3;
+}
+.tank-hatch {
+  fill: color-mix(in srgb, var(--team) 55%, #101411);
+  stroke: #101411;
+  stroke-width: 2;
+}
+.muzzle-flash {
+  fill: #fff3c4;
+  opacity: 0.9;
+}
+.recoil {
+  animation: recoil 0.22s ease-out;
+}
+@keyframes recoil {
+  0% {
+    transform: translateY(16px);
+  }
+  100% {
+    transform: translateY(0);
+  }
 }
 .aim-tag {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  padding-top: 6px;
   text-align: center;
   font-size: 14px;
   color: #c4d5ae;
@@ -639,10 +710,24 @@ kbd {
   white-space: nowrap;
 }
 .cooldown-meter {
+  display: block;
+  appearance: none;
   height: 5px;
   width: 100%;
-  accent-color: var(--lime);
+  border: 0;
+  border-radius: 3px;
+  overflow: hidden;
+  background: #303b32;
   margin: 8px 0 12px;
+}
+.cooldown-meter::-webkit-progress-bar {
+  background: #303b32;
+}
+.cooldown-meter::-webkit-progress-value {
+  background: var(--lime);
+}
+.cooldown-meter::-moz-progress-bar {
+  background: var(--lime);
 }
 .hint {
   color: var(--muted);
@@ -766,12 +851,6 @@ kbd {
 .app-shell.damage {
   box-shadow: inset 0 0 90px #be372a55;
 }
-.shot-flash {
-  position: absolute;
-  inset: 35px;
-  pointer-events: none;
-  background: radial-gradient(circle, #d3ffa065, transparent 65%);
-}
 .console .match-phase strong {
   font-size: clamp(24px, 3vw, 38px);
 }
@@ -802,22 +881,22 @@ kbd {
 .large .stat-label {
   font-size: 18px;
 }
-.console .topbar {
+.app-shell .topbar {
   min-height: 68px;
 }
-.console main {
+.app-shell main {
   padding-top: 20px;
 }
-.console .page-heading {
+.app-shell .page-heading {
   margin-bottom: 16px;
 }
-.console .page-heading h1 {
+.app-shell .page-heading h1 {
   font-size: 28px;
 }
-.console .page-heading p {
+.app-shell .page-heading p {
   display: none;
 }
-.console .match-strip {
+.app-shell .match-strip {
   padding-block: 12px;
   margin-bottom: 18px;
 }
@@ -1000,8 +1079,8 @@ dialog::backdrop {
     gap: 12px;
   }
   .battle-grid.pilot {
-    grid-template-columns: minmax(220px, 1fr) minmax(300px, 1.35fr) minmax(
-        200px,
+    grid-template-columns: minmax(210px, 1fr) minmax(320px, 1.8fr) minmax(
+        190px,
         0.85fr
       );
     gap: 14px;

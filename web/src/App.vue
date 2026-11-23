@@ -8,7 +8,13 @@ import {
   shallowRef,
   watch,
 } from "vue";
-import { canDrive, openSocket, pageRoute, socketUrl } from "./connection.js";
+import {
+  canDrive,
+  normalizeServer,
+  openSocket,
+  pageRoute,
+  socketUrl,
+} from "./connection.js";
 import { createDriveController } from "./controls.js";
 
 const route = pageRoute(location.pathname);
@@ -42,12 +48,18 @@ const status = ref("idle");
 const error = ref("");
 const feed = ref([]);
 const paused = ref(false);
-const focused = ref(!document.hidden);
+const focused = ref(!document.hidden && document.hasFocus());
 const slow = ref(false);
 const now = ref(Date.now());
 const lastShot = ref(0);
 const angle = ref(0);
 const drive = ref({ left: 0, right: 0 });
+const pressed = ref(new Set());
+const isFullScreen = ref(false);
+const dial = ref(null);
+const turretEl = ref(null);
+const leftTread = ref(null);
+const rightTread = ref(null);
 const modal = ref("");
 const dialog = ref(null);
 const draft = ref({});
@@ -74,6 +86,16 @@ const directions = [
   { key: "KeyS", label: "S", action: "Reverse", arrow: "↓" },
   { key: "KeyD", label: "D", action: "Turn right", arrow: "→" },
 ];
+// Dial geometry, in SVG units. The turret rotates about this point.
+const PIVOT = { x: 320, y: 312 };
+const AIM_DEADZONE = 40;
+// Display-only slew rate, close to a hobby servo under load.
+const TURRET_DEG_PER_S = 360;
+const TREAD_UNITS_PER_MS = 0.28;
+const dialTicks = Array.from({ length: 13 }, (_, i) => ({
+  angle: i * 15 - 90,
+  major: i % 3 === 0,
+}));
 const connected = computed(() => status.value === "connected");
 const stage = computed(() => state.value?.status);
 const own = computed(() =>
@@ -129,6 +151,12 @@ const aimStatus = computed(() => {
     return `Protected · ${seconds(own.value.protected_ms)} s`;
   return "Ready to aim";
 });
+const fireLabel = computed(() => {
+  if (cooldown.value) return `Reloading ${seconds(cooldown.value)} s`;
+  if (stage.value === "running" && own.value?.alive && !own.value.ammo)
+    return "Out of ammo";
+  return "Fire cannon";
+});
 const visibleFeedback = computed(() =>
   feedback.value.until > now.value ? feedback.value : null,
 );
@@ -139,9 +167,12 @@ function formatTime(ms) {
 }
 function tankStatus(tank) {
   if (!tank.online) return "Offline";
+  // Tanks do not respawn after the match ends.
+  if (stage.value === "ended") return tank.alive ? "Match ended" : "Destroyed";
   if (!tank.alive) return `Respawn in ${seconds(tank.respawn_ms)} s`;
+  if (!tank.player) return "Waiting for player";
   if (tank.protected_ms) return `Protected · ${seconds(tank.protected_ms)} s`;
-  if (["countdown", "ended"].includes(stage.value)) return "Controls locked";
+  if (stage.value === "countdown") return "Controls locked";
   return "Ready";
 }
 
@@ -167,6 +198,7 @@ function send(message) {
 function stop() {
   keys.clear();
   pointerKeys.clear();
+  pressed.value = new Set();
   slow.value = false;
   motion.reset();
   drive.value = { left: 0, right: 0 };
@@ -268,6 +300,14 @@ function sendDrive() {
   const turn =
     Number(has("KeyD") || has("ArrowRight")) -
     Number(has("KeyA") || has("ArrowLeft"));
+  pressed.value = new Set(
+    [
+      forward > 0 && "KeyW",
+      forward < 0 && "KeyS",
+      turn < 0 && "KeyA",
+      turn > 0 && "KeyD",
+    ].filter(Boolean),
+  );
   slow.value = keys.has("ShiftLeft") || keys.has("ShiftRight");
   drive.value = motion.update(forward, turn, slow.value, performance.now());
   send({ type: "drive", ...drive.value, turret: angle.value });
@@ -279,14 +319,29 @@ watch(
   },
   { flush: "sync" },
 );
-function isEditing(target) {
+function isTyping(target) {
   return (
     target instanceof HTMLElement &&
-    !!target.closest('input,select,textarea,[contenteditable="true"]')
+    !!target.closest(
+      'input:not([type="range"]),select,textarea,[contenteditable="true"]',
+    )
   );
 }
 function keydown(event) {
-  if (!enabled.value || isEditing(event.target)) return;
+  if (!player || !joined.value || modal.value || isTyping(event.target)) return;
+  // macOS never sends keyup for letters released while Cmd is held, so a
+  // shortcut must not leave a drive key stuck down.
+  if (event.metaKey || event.ctrlKey || event.altKey) {
+    if (keys.size) stop();
+    return;
+  }
+  const isArrow = event.code.startsWith("Arrow");
+  if (isArrow && event.target?.matches?.('input[type="range"]')) return;
+  const isFireKey =
+    event.code === "Space" && !event.target?.closest?.("button");
+  // Keep the page from scrolling during locked phases too.
+  if (isArrow || isFireKey) event.preventDefault();
+  if (!enabled.value) return;
   if (
     movementKeys.has(event.code) ||
     event.code === "ShiftLeft" ||
@@ -299,10 +354,7 @@ function keydown(event) {
     keys.add(event.code);
     if (isNew) sendDrive();
   }
-  if (event.code === "Space" && !event.target?.closest?.("button")) {
-    event.preventDefault();
-    if (!event.repeat) fire();
-  }
+  if (isFireKey && !event.repeat) fire();
 }
 function keyup(event) {
   if (keys.delete(event.code)) sendDrive();
@@ -313,14 +365,14 @@ function blur() {
 }
 function focus() {
   stop();
-  focused.value = true;
+  focused.value = !document.hidden && document.hasFocus();
 }
 function visibility() {
   if (document.hidden) blur();
   else focus();
 }
 function focusIn(event) {
-  if (isEditing(event.target)) stop();
+  if (isTyping(event.target)) stop();
 }
 function pressDirection(event, key) {
   if (!enabled.value) return;
@@ -334,13 +386,49 @@ function releaseDirection(event) {
 }
 function aim(event) {
   if (!enabled.value || event.pointerType !== "mouse") return;
-  const bounds = event.currentTarget.getBoundingClientRect();
-  angle.value = Math.round(
-    Math.max(
-      -90,
-      Math.min(90, ((event.clientX - bounds.left) / bounds.width) * 180 - 90),
-    ),
+  const matrix = dial.value?.getScreenCTM();
+  if (!matrix) return;
+  const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(
+    matrix.inverse(),
   );
+  const dx = point.x - PIVOT.x;
+  const dy = point.y - PIVOT.y;
+  // Bearing is unstable on the pivot and directly behind it, where a 1px move
+  // would otherwise swing the turret from one end stop to the other.
+  if (Math.hypot(dx, dy) < AIM_DEADZONE) return;
+  if (dy > 0 && Math.abs(dx) < AIM_DEADZONE) return;
+  const bearing = (Math.atan2(dx, -dy) * 180) / Math.PI;
+  angle.value = Math.round(Math.max(-90, Math.min(90, bearing)));
+}
+function releaseFocus(event) {
+  // After a mouse click, Space must fire rather than re-press this button.
+  if (event.detail) event.currentTarget.blur();
+}
+let frame = 0;
+let frameAt = 0;
+let shownAngle = 0;
+let leftOffset = 0;
+let rightOffset = 0;
+const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+function animate(time) {
+  const dt = Math.min(250, time - (frameAt || time));
+  frameAt = time;
+  const step = (TURRET_DEG_PER_S * dt) / 1000;
+  const gap = angle.value - shownAngle;
+  shownAngle = reducedMotion.matches
+    ? angle.value
+    : shownAngle + Math.sign(gap) * Math.min(Math.abs(gap), step);
+  turretEl.value?.setAttribute(
+    "transform",
+    `rotate(${shownAngle.toFixed(2)} ${PIVOT.x} ${PIVOT.y})`,
+  );
+  if (!reducedMotion.matches) {
+    leftOffset += (drive.value.left / 100) * dt * TREAD_UNITS_PER_MS;
+    rightOffset += (drive.value.right / 100) * dt * TREAD_UNITS_PER_MS;
+    leftTread.value?.setAttribute("stroke-dashoffset", leftOffset.toFixed(1));
+    rightTread.value?.setAttribute("stroke-dashoffset", rightOffset.toFixed(1));
+  }
+  frame = requestAnimationFrame(animate);
 }
 function fire() {
   if (
@@ -358,7 +446,10 @@ function togglePause() {
 function command(type) {
   error.value = "";
   pending.value = true;
-  if (!send({ type })) pending.value = false;
+  if (!send({ type })) {
+    pending.value = false;
+    error.value = "Command not sent. Check the server connection.";
+  }
 }
 async function openDialog(kind) {
   stop();
@@ -376,7 +467,7 @@ function applySettings() {
   try {
     const next = { ...draft.value, ...route, name: draft.value.name.trim() };
     socketUrl(next);
-    next.server = new URL(next.server.trim()).origin;
+    next.server = new URL(normalizeServer(next.server)).origin;
     try {
       sessionStorage.setItem(serverKey, next.server);
     } catch {
@@ -413,12 +504,18 @@ function pageHide() {
   connection?.close();
 }
 function pageShow(event) {
-  if (event.persisted && joined.value) connect();
+  if (!event.persisted) return;
+  focus();
+  if (joined.value) connect();
+}
+function fullScreenChange() {
+  isFullScreen.value = !!document.fullscreenElement;
 }
 let driveTimer, clockTimer;
 onMounted(() => {
   if (!route) return;
   if (joined.value) connect();
+  if (player) frame = requestAnimationFrame(animate);
   driveTimer = setInterval(sendDrive, 50);
   clockTimer = setInterval(() => {
     now.value = Date.now();
@@ -431,6 +528,7 @@ onMounted(() => {
   window.addEventListener("pageshow", pageShow);
   document.addEventListener("visibilitychange", visibility);
   document.addEventListener("focusin", focusIn);
+  document.addEventListener("fullscreenchange", fullScreenChange);
 });
 onUnmounted(() => {
   session++;
@@ -438,6 +536,7 @@ onUnmounted(() => {
   connection?.close();
   clearInterval(driveTimer);
   clearInterval(clockTimer);
+  cancelAnimationFrame(frame);
   window.removeEventListener("keydown", keydown);
   window.removeEventListener("keyup", keyup);
   window.removeEventListener("blur", blur);
@@ -446,6 +545,7 @@ onUnmounted(() => {
   window.removeEventListener("pageshow", pageShow);
   document.removeEventListener("visibilitychange", visibility);
   document.removeEventListener("focusin", focusIn);
+  document.removeEventListener("fullscreenchange", fullScreenChange);
 });
 </script>
 
@@ -455,7 +555,7 @@ onUnmounted(() => {
     <h1>{{ home ? "Choose your station." : "Page not found." }}</h1>
     <p>Choose a player station or open the control console.</p>
     <nav class="management-buttons" aria-label="Available pages">
-      <a class="primary" href="/player/1">Tank 01</a>
+      <a class="secondary" href="/player/1">Tank 01</a>
       <a class="secondary" href="/player/2">Tank 02</a>
       <a class="secondary" href="/control">Control console</a>
     </nav>
@@ -468,8 +568,8 @@ onUnmounted(() => {
     <header class="topbar">
       <a
         class="brand"
-        href="/control"
-        aria-label="Tank Arena control console"
+        href="/"
+        aria-label="Tank Arena home"
       >
         <span class="brand-mark">⊕</span
         ><span
@@ -525,7 +625,7 @@ onUnmounted(() => {
           </p>
         </div>
         <button v-if="!player" class="secondary" @click="fullScreen">
-          Full screen
+          {{ isFullScreen ? "Exit full screen" : "Full screen" }}
         </button>
       </div>
       <div v-if="error" class="error-banner" role="alert">
@@ -712,26 +812,61 @@ onUnmounted(() => {
             <div class="section-label">
               <span>⊕ Aim</span><span class="mono">TURRET CONTROL</span>
             </div>
-            <div class="aim-area" @pointermove="aim" @click="fire">
-              <span class="compass north">FRONT / 0°</span
-              ><span class="compass west">−90°</span
-              ><span class="compass east">+90°</span>
-              <div class="radar">
-                <div class="radar-inner"></div>
-                <div
-                  class="aim-line"
-                  :style="{ transform: `rotate(${angle}deg)` }"
-                ></div>
-                <div class="tank-glyph hero-tank" aria-hidden="true">
-                  <i class="track left"></i><i class="track right"></i
-                  ><i class="hull"></i
-                  ><i
-                    class="turret"
-                    :style="{ transform: `rotate(${angle}deg)` }"
-                    ><i></i
-                  ></i>
-                </div>
-              </div>
+            <div
+              class="aim-area"
+              :class="[`team-${route.tankId}`, { locked: !enabled }]"
+              @pointermove="aim"
+              @click="fire"
+            >
+              <svg
+                ref="dial"
+                class="turret-dial"
+                viewBox="0 0 640 440"
+                role="img"
+                :aria-label="`Turret aimed at ${angle} degrees`"
+              >
+                <path
+                  class="dial-sector"
+                  d="M50 312 A270 270 0 0 1 590 312 Z"
+                />
+                <path class="dial-ring" d="M115 312 A205 205 0 0 1 525 312" />
+                <line
+                  v-for="tick in dialTicks"
+                  :key="tick.angle"
+                  class="dial-tick"
+                  :class="{ major: tick.major }"
+                  x1="320"
+                  y1="42"
+                  x2="320"
+                  :y2="tick.major ? 66 : 54"
+                  :transform="`rotate(${tick.angle} 320 312)`"
+                />
+                <text class="dial-label" x="320" y="26">FRONT 0°</text>
+                <text class="dial-label" x="62" y="346">−90° L</text>
+                <text class="dial-label" x="578" y="346">+90° R</text>
+                <g :transform="`rotate(${angle} 320 312)`">
+                  <line class="aim-ray" x1="320" y1="312" x2="320" y2="42" />
+                  <circle class="aim-reticle" cx="320" cy="42" r="12" />
+                  <circle class="aim-dot" cx="320" cy="42" r="3" />
+                </g>
+                <g class="dial-tank">
+                  <rect class="tank-track" x="222" y="196" width="42" height="236" rx="14" />
+                  <rect class="tank-track" x="376" y="196" width="42" height="236" rx="14" />
+                  <line ref="leftTread" class="tank-tread" x1="243" y1="202" x2="243" y2="426" />
+                  <line ref="rightTread" class="tank-tread" x1="397" y1="202" x2="397" y2="426" />
+                  <rect class="tank-hull" x="258" y="208" width="124" height="212" rx="16" />
+                  <path class="tank-detail" d="M272 232 H368 M284 396 H356 M284 406 H356" />
+                  <g ref="turretEl">
+                    <g :class="{ recoil: now - lastShot < 220 }">
+                      <circle v-if="now - lastShot < 120" class="muzzle-flash" cx="320" cy="96" r="26" />
+                      <rect class="tank-barrel" x="311" y="128" width="18" height="140" rx="3" />
+                      <rect class="tank-muzzle" x="305" y="116" width="30" height="24" rx="4" />
+                    </g>
+                    <rect class="tank-turret" x="270" y="262" width="100" height="100" rx="32" />
+                    <circle class="tank-hatch" cx="320" cy="312" r="17" />
+                  </g>
+                </g>
+              </svg>
               <div class="aim-tag">{{ aimStatus }}</div>
               <div
                 v-if="visibleFeedback"
@@ -741,7 +876,6 @@ onUnmounted(() => {
               >
                 {{ visibleFeedback.text }}
               </div>
-              <div v-if="now - lastShot < 220" class="shot-flash"></div>
             </div>
             <div class="angle-control">
               <label for="angle">Turret angle</label
@@ -753,12 +887,18 @@ onUnmounted(() => {
                 min="-90"
                 max="90"
                 :disabled="!enabled"
+                @pointerup="$event.currentTarget.blur()"
               /><span>Left</span><span>Right</span>
             </div>
-            <button class="fire-button" :disabled="!fireReady" @click="fire">
-              <span>{{
-                cooldown ? `Reloading ${seconds(cooldown)} s` : "Fire cannon"
-              }}</span><kbd>SPACE</kbd>
+            <button
+              class="fire-button"
+              :disabled="!fireReady"
+              @click="
+                fire();
+                releaseFocus($event);
+              "
+            >
+              <span>{{ fireLabel }}</span><kbd>SPACE</kbd>
             </button>
             <progress
               class="cooldown-meter"
@@ -784,7 +924,10 @@ onUnmounted(() => {
                   v-for="direction in directions"
                   :key="direction.key"
                   class="pad-key"
-                  :class="direction.label.toLowerCase()"
+                  :class="[
+                    direction.label.toLowerCase(),
+                    { active: pressed.has(direction.key) },
+                  ]"
                   :aria-label="`${direction.label} ${direction.action}`"
                   :disabled="!enabled"
                   @pointerdown.prevent="pressDirection($event, direction.key)"
@@ -813,7 +956,10 @@ onUnmounted(() => {
               class="stop-button"
               :class="{ resume: paused }"
               :disabled="!connected"
-              @click="togglePause"
+              @click="
+                togglePause();
+                releaseFocus($event);
+              "
             >
               {{ paused ? "Resume controls" : "Pause / Stop" }}
             </button>

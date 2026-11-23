@@ -57,8 +57,19 @@ export function parseServerMessage(text) {
   return null;
 }
 
+// Accept the bare "192.168.2.1:8000" form people naturally type.
+export function normalizeServer(value) {
+  const text = value.trim();
+  return /^[a-z][a-z\d+.-]*:\/\//i.test(text) ? text : `http://${text}`;
+}
+
 export function socketUrl(settings) {
-  const url = new URL(settings.server.trim());
+  let url;
+  try {
+    url = new URL(normalizeServer(settings.server));
+  } catch {
+    throw new Error("Enter a valid HTTP(S) or WS(S) server address.");
+  }
   if (url.protocol === "http:") url.protocol = "ws:";
   if (url.protocol === "https:") url.protocol = "wss:";
   if (!["ws:", "wss:"].includes(url.protocol) || url.username || url.password)
