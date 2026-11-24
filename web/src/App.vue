@@ -88,7 +88,7 @@ const directions = [
 ];
 // Dial geometry, in SVG units. The turret rotates about this point.
 const PIVOT = { x: 320, y: 312 };
-const AIM_DEADZONE = 40;
+const AIM_DEADZONE = 16;
 // Display-only slew rate, close to a hobby servo under load.
 const TURRET_DEG_PER_S = 360;
 const TREAD_UNITS_PER_MS = 0.28;
@@ -386,6 +386,8 @@ function releaseDirection(event) {
 }
 function aim(event) {
   if (!enabled.value || event.pointerType !== "mouse") return;
+  // Aim from anywhere on the page, but hold still while reaching for a control.
+  if (event.target?.closest?.("button,a,input,dialog")) return;
   const matrix = dial.value?.getScreenCTM();
   if (!matrix) return;
   const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(
@@ -520,6 +522,7 @@ onMounted(() => {
   clockTimer = setInterval(() => {
     now.value = Date.now();
   }, 50);
+  if (player) window.addEventListener("pointermove", aim);
   window.addEventListener("keydown", keydown);
   window.addEventListener("keyup", keyup);
   window.addEventListener("blur", blur);
@@ -537,6 +540,7 @@ onUnmounted(() => {
   clearInterval(driveTimer);
   clearInterval(clockTimer);
   cancelAnimationFrame(frame);
+  window.removeEventListener("pointermove", aim);
   window.removeEventListener("keydown", keydown);
   window.removeEventListener("keyup", keyup);
   window.removeEventListener("blur", blur);
@@ -815,7 +819,6 @@ onUnmounted(() => {
             <div
               class="aim-area"
               :class="[`team-${route.tankId}`, { locked: !enabled }]"
-              @pointermove="aim"
               @click="fire"
             >
               <svg
@@ -907,8 +910,8 @@ onUnmounted(() => {
               aria-label="Fire cooldown"
             ></progress>
             <p class="hint">
-              Move the mouse to aim. Click the aiming area or press Space to
-              fire.
+              Move the mouse anywhere to aim. Click the aiming area or press
+              Space to fire.
             </p>
           </section>
           <section v-if="player" class="drive-panel panel">
@@ -1134,7 +1137,7 @@ onUnmounted(() => {
           <kbd>SHIFT</kbd>
           <p>Slow gear for precise positioning.</p>
           <kbd>MOUSE</kbd>
-          <p>Move inside the aiming area to turn the turret.</p>
+          <p>Move anywhere on the page to aim. Buttons and sliders hold the turret still.</p>
           <kbd>SPACE / CLICK</kbd>
           <p>Fire once per second. Live matches consume ammo.</p>
         </div>
