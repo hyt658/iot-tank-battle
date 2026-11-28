@@ -11,8 +11,10 @@ from app.config import Settings
 from app.connections import Connection
 from app.constants import (
     CONNECTION_TIMEOUT_MS,
+    DRIVE_LOG_INTERVAL_MS,
     PING_INTERVAL_MS,
     REPLACED_CONNECTION_CLOSE_CODE,
+    SLOW_RTT_MS,
     WEB_STATE_INTERVAL_MS,
 )
 from app.errors import OperationError, ProtocolError
@@ -38,6 +40,12 @@ from app.protocol import (
 logger = logging.getLogger(__name__)
 
 
+def _describe(connection: Connection) -> str:
+    if connection.tank_id is None:
+        return f"role={connection.role.value}"
+    return f"role={connection.role.value} tank_id={connection.tank_id}"
+
+
 class Arena:
     def __init__(self, settings: Settings, clock: Callable[[], int] = monotonic_ms) -> None:
         self.settings = settings
@@ -51,6 +59,8 @@ class Arena:
         self._scheduler: asyncio.Task | None = None
         self._stopping = False
         self._fire_owners: dict[int, Connection] = {}
+        # Last logged (left, right, turret) and when, per tank, to throttle drive logs.
+        self._drive_logs: dict[int, tuple[tuple[int, int, int], int]] = {}
 
     async def start(self) -> None:
         self._scheduler = asyncio.create_task(self._run_scheduler(), name="arena-scheduler")
@@ -113,6 +123,7 @@ class Arena:
                 if connection.closing:
                     return
                 connection.last_received_ms = received_at
+                message = None
                 try:
                     text = incoming.get("text")
                     if text is None:
@@ -129,10 +140,22 @@ class Arena:
                             connection.tank_id,
                             exc,
                         )
+                    elif message is not None and not isinstance(message, Pong):
+                        logger.info(
+                            "%s rejected: %s reason=%s",
+                            message.type.capitalize(),
+                            _describe(connection),
+                            exc,
+                        )
                     connection.send(Error(message=str(exc)))
 
     def _register(self, connection: Connection, player_name: str | None = None) -> None:
         self.connections.add(connection)
+        logger.info(
+            "Connected: %s%s",
+            _describe(connection),
+            f" name={player_name!r}" if player_name is not None else "",
+        )
         if connection.role == Role.CONTROL:
             connection.send(self.game.snapshot())
             return
@@ -164,16 +187,19 @@ class Arena:
             if message.ts not in connection.pending_pings:
                 raise ProtocolError("pong must echo the original server ts value.")
             connection.pending_pings.remove(message.ts)
-            logger.info(
-                "Heartbeat RTT: connection=%x role=%s tank_id=%s rtt_ms=%d",
-                id(connection),
-                connection.role.value,
-                connection.tank_id,
-                connection.last_received_ms - message.ts,
+            rtt_ms = connection.last_received_ms - message.ts
+            # Every connection answers a ping each second, so only slow ones are
+            # worth seeing at the default level.
+            logger.log(
+                logging.WARNING if rtt_ms > SLOW_RTT_MS else logging.DEBUG,
+                "Heartbeat RTT: %s rtt_ms=%d",
+                _describe(connection),
+                rtt_ms,
             )
             return
         if isinstance(message, GameCommand):
             update = self.game.start() if message.type == "start" else self.game.reset()
+            logger.info("Match %s: phase=%s", message.type, self.game.phase.value)
             for client in self.connections:
                 client.discard_game_output()
             for tank in self.tanks.values():
@@ -188,12 +214,19 @@ class Arena:
                 return
             tank = self._available_tank(tank_id)
             if tank is not None:
+                self._log_drive(tank_id, message)
                 tank.send_drive(message)
         elif isinstance(message, Fire):
             tank = self._available_tank(tank_id)
             if tank is None:
                 raise OperationError("Tank is offline.")
             record = self.game.reserve_fire(tank_id)
+            logger.info(
+                "Fire: tank_id=%s shot=%s ammo=%s",
+                tank_id,
+                record.shot,
+                self.game.tanks[tank_id].ammo if record.charged_ammo else "practice",
+            )
             self._fire_owners[record.shooter] = connection
             tank.send(
                 TankFire(type="fire", shot=record.shot),
@@ -207,6 +240,22 @@ class Arena:
                 self._broadcast_web_state()
         elif isinstance(message, Hit):
             self._handle_hit(tank_id, message)
+
+    def _log_drive(self, tank_id: int, message: Drive) -> None:
+        """Log a forwarded drive when it changes, at most once per interval per tank.
+
+        Players send drive at 20 Hz. The frontend keeps sending the latest value,
+        so the final value after a burst of changes is still logged.
+        """
+        values = (message.left, message.right, message.turret)
+        now = self.clock()
+        last = self._drive_logs.get(tank_id)
+        if last is not None and (last[0] == values or now - last[1] < DRIVE_LOG_INTERVAL_MS):
+            return
+        self._drive_logs[tank_id] = (values, now)
+        logger.info(
+            "Drive: tank_id=%s left=%d right=%d turret=%d", tank_id, *values
+        )
 
     def _available_tank(self, tank_id: int) -> Connection | None:
         tank = self.tanks.get(tank_id)
@@ -232,6 +281,8 @@ class Arena:
         self._publish_change(result.update)
 
     def _detach(self, connection: Connection) -> None:
+        if connection in self.connections:
+            logger.info("Disconnected: %s", _describe(connection))
         self.connections.discard(connection)
         changed = False
         tank_id = connection.tank_id
@@ -241,6 +292,7 @@ class Arena:
             changed = True
         elif connection.role == Role.PLAYER and self.players.get(tank_id) is connection:
             del self.players[tank_id]
+            self._drive_logs.pop(tank_id, None)
             self.game.tanks[tank_id].player = None
             tank = self.tanks.get(tank_id)
             if tank is not None:

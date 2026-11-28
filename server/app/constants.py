@@ -18,3 +18,7 @@ RESPAWN_MS = 5_000
 SPAWN_PROTECTION_MS = 3_000
 AMMO_REFILL_MS = 3_000
 SHOT_COUNT = 16
+# Logging only: heartbeats slower than this are logged as warnings, and drive
+# changes are logged at most once per interval for each tank.
+SLOW_RTT_MS = 200
+DRIVE_LOG_INTERVAL_MS = 500
