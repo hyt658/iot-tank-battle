@@ -13,9 +13,6 @@ struct Message {
         State,
         Drive,
         Fire,
-        Hurt,
-        Death,
-        Respawn,
         Error
     };
 

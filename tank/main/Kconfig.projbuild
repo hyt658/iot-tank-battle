@@ -6,11 +6,11 @@ menu "Tank Config"
 
     config TANK_WIFI_PASSWORD
         string "Wi-Fi password"
-        default ""
+        default "iot-tank-passwd"
 
     config TANK_SERVER_HOST
         string "Server host and port"
-        default "192.168.2.1:8000"
+        default "10.42.0.2:8000"
 
     config TANK_ID
         int "Tank ID"

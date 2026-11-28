@@ -38,12 +38,6 @@ std::optional<Message> core::protocol::parse(const char* data, size_t len) {
     switch (msg.type) {
         case Message::Type::Unknown:
             [[fallthrough]];
-        case Message::Type::Hurt:
-            [[fallthrough]];
-        case Message::Type::Death:
-            [[fallthrough]];
-        case Message::Type::Respawn:
-            [[fallthrough]];
         case Message::Type::Error:
             break;
         case Message::Type::State: {
@@ -129,9 +123,6 @@ Message::Type to_type(std::string_view name) {
     if (name == "state") return Message::Type::State;
     if (name == "drive") return Message::Type::Drive;
     if (name == "fire") return Message::Type::Fire;
-    if (name == "hurt") return Message::Type::Hurt;
-    if (name == "death") return Message::Type::Death;
-    if (name == "respawn") return Message::Type::Respawn;
     return Message::Type::Unknown;
 }
 
