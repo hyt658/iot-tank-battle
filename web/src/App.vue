@@ -16,6 +16,7 @@ import {
   socketUrl,
 } from "./connection.js";
 import { createDriveController } from "./controls.js";
+import { createSoundPlayer } from "./sound.js";
 
 const route = pageRoute(location.pathname);
 const home = ["/", "/index.html"].includes(location.pathname);
@@ -65,6 +66,19 @@ const dialog = ref(null);
 const draft = ref({});
 const formError = ref("");
 const pending = ref(false);
+// Players hear their own tank. The console starts muted so a big screen in
+// the same room does not double every sound the players already hear.
+const soundKey = `tank-arena.sound.${player ? "player" : "control"}`;
+function initialMuted() {
+  try {
+    const saved = localStorage.getItem(soundKey);
+    if (saved) return saved === "off";
+  } catch {
+    // Storage may be disabled by the browser.
+  }
+  return !player;
+}
+const muted = ref(initialMuted());
 const feedback = ref({ text: "", kind: "", until: 0 });
 const killCall = ref({ text: "", until: 0 });
 const phases = {
@@ -180,6 +194,42 @@ let connection = null;
 let session = 0;
 let eventId = 0;
 const motion = createDriveController();
+const sound = createSoundPlayer();
+function playSound(name) {
+  if (!muted.value) sound.play(name);
+}
+function toggleSound() {
+  muted.value = !muted.value;
+  try {
+    localStorage.setItem(soundKey, muted.value ? "off" : "on");
+  } catch {
+    // Storage may be disabled by the browser.
+  }
+  if (!muted.value) {
+    sound.unlock();
+    playSound("hitConfirm");
+  }
+}
+// Pick the sound for a hit or kill event, or null if this page stays quiet.
+function eventSound(message) {
+  const kill = message.type === "kill";
+  if (!player) return kill ? "death" : "hurt";
+  if (message.target === route.tankId) return kill ? "death" : "hurt";
+  if (message.shooter === route.tankId) return kill ? "killConfirm" : "hitConfirm";
+  return null;
+}
+// The web gets no respawn event, so watch for a tank coming back to life
+// while the match keeps running. Reset and a new round also revive tanks, but
+// they change the status, so they never match.
+function respawned(previous, next) {
+  if (previous?.status !== "running" || next.status !== "running") return false;
+  return next.tanks.some(
+    (tank) =>
+      (!player || tank.id === route.tankId) &&
+      tank.alive &&
+      previous.tanks.find((t) => t.id === tank.id)?.alive === false,
+  );
+}
 const keys = new Set();
 const pointerKeys = new Map();
 const movementKeys = new Set([
@@ -241,6 +291,7 @@ function connect(next = settings.value) {
             feed.value = [];
             feedback.value.until = killCall.value.until = 0;
           }
+          if (respawned(state.value, message)) playSound("respawn");
           state.value = message;
           pending.value = false;
         } else if (message.type === "error") {
@@ -252,6 +303,8 @@ function connect(next = settings.value) {
             0,
             30,
           );
+          const name = eventSound(message);
+          if (name) playSound(name);
           if (player)
             feedback.value = {
               kind: message.target === route.tankId ? "damage" : "hit",
@@ -439,7 +492,11 @@ function fire() {
     (stage.value !== "lobby" && !own.value?.ammo)
   )
     return;
-  if (send({ type: "fire" })) lastShot.value = Date.now();
+  // The server sends no fire confirmation, so the sound plays on sending.
+  if (send({ type: "fire" })) {
+    lastShot.value = Date.now();
+    playSound("fire");
+  }
 }
 function togglePause() {
   stop();
@@ -532,6 +589,9 @@ onMounted(() => {
   document.addEventListener("visibilitychange", visibility);
   document.addEventListener("focusin", focusIn);
   document.addEventListener("fullscreenchange", fullScreenChange);
+  // Capture, so the audio is unlocked before the fire handler plays a sound.
+  window.addEventListener("pointerdown", sound.unlock, true);
+  window.addEventListener("keydown", sound.unlock, true);
 });
 onUnmounted(() => {
   session++;
@@ -550,6 +610,9 @@ onUnmounted(() => {
   document.removeEventListener("visibilitychange", visibility);
   document.removeEventListener("focusin", focusIn);
   document.removeEventListener("fullscreenchange", fullScreenChange);
+  window.removeEventListener("pointerdown", sound.unlock, true);
+  window.removeEventListener("keydown", sound.unlock, true);
+  sound.close();
 });
 </script>
 
@@ -597,6 +660,33 @@ onUnmounted(() => {
           :class="connected ? 'good' : 'bad'"
           >● {{ statuses[status] }}</span
         >
+        <button
+          class="icon-button"
+          :aria-label="muted ? 'Turn sound on' : 'Turn sound off'"
+          :aria-pressed="!muted"
+          :title="muted ? 'Sound off' : 'Sound on'"
+          @click="toggleSound"
+        >
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor" />
+            <path
+              v-if="!muted"
+              d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+            />
+            <path
+              v-else
+              d="M16.5 9.5l5 5m0-5l-5 5"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+            />
+          </svg>
+        </button>
         <button
           class="icon-button"
           aria-label="Controls and help"
