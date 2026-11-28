@@ -1,8 +1,10 @@
-// Game sounds, synthesized in the browser now that the tank has no buzzer.
-// They use the voices of an 8-bit console: square and triangle waves plus a
-// coarse noise channel for shots and explosions.
+// Game sounds, played in the browser now that the tank has no buzzer.
+// Each event plays web/public/sounds/<name>.wav when that file exists, and
+// falls back to a synthesized 8-bit sound otherwise.
 
 const VOLUME = 0.12;
+const FILE_VOLUME = 0.8;
+const FILE_NAMES = ["fire", "hurt", "death", "respawn", "hitConfirm", "killConfirm"];
 
 // Each sound schedules its voices from time t on the output node.
 const recipes = {
@@ -49,7 +51,21 @@ const recipes = {
 export function createSoundPlayer() {
   let context = null;
   let output = null;
+  let fileOutput = null;
   const noiseBuffers = new Map();
+  const files = new Map();
+
+  // Decode every sound file once. A missing or broken file just leaves that
+  // event on its synthesized sound.
+  function loadFiles() {
+    for (const name of FILE_NAMES) {
+      fetch(`${import.meta.env.BASE_URL}sounds/${name}.wav`)
+        .then((response) => (response.ok ? response.arrayBuffer() : Promise.reject()))
+        .then((data) => context?.decodeAudioData(data))
+        .then((buffer) => buffer && files.set(name, buffer))
+        .catch(() => {});
+    }
+  }
 
   // Browsers keep audio suspended until the user interacts with the page, so
   // call this from a click or key press handler.
@@ -61,6 +77,10 @@ export function createSoundPlayer() {
       output = context.createGain();
       output.gain.value = VOLUME;
       output.connect(context.destination);
+      fileOutput = context.createGain();
+      fileOutput.gain.value = FILE_VOLUME;
+      fileOutput.connect(context.destination);
+      loadFiles();
     }
     if (context.state === "suspended") context.resume().catch(() => {});
   }
@@ -129,14 +149,23 @@ export function createSoundPlayer() {
   // a shot and the hit that follows it a moment later.
   function play(name) {
     // Skip rather than queue: a sound that plays seconds late is confusing.
-    if (!context || context.state !== "running" || !recipes[name]) return;
-    recipes[name](voices, context.currentTime + 0.01);
+    if (!context || context.state !== "running") return;
+    const file = files.get(name);
+    if (file) {
+      const source = context.createBufferSource();
+      source.buffer = file;
+      source.connect(fileOutput);
+      source.start();
+    } else if (recipes[name]) {
+      recipes[name](voices, context.currentTime + 0.01);
+    }
   }
 
   function close() {
     context?.close().catch(() => {});
-    context = output = null;
+    context = output = fileOutput = null;
     noiseBuffers.clear();
+    files.clear();
   }
 
   return { unlock, play, close };
